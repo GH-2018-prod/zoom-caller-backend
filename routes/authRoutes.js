@@ -1,9 +1,9 @@
-const express = require('express');
-const { registerUser, loginUser, getUser } = require('../controllers/userController');
-const { check } = require('express-validator');
-const auth = require('../middleware/authMiddleware');
+const express = require('express')
+const { registerUser, loginUser, getUser  } = require('../controllers/userController')
+const { check } = require('express-validator')
+const { auth } = require('../middleware/authMiddleware')
 
-const router = express.Router();
+const router = express.Router()
 
 // Registro de usuario
 router.post(
@@ -17,9 +17,9 @@ router.post(
 );
 
 // Login de usuario
-router.post('/login', loginUser);
+router.post('/login', loginUser)
 
 // Obtener usuario autenticado
-router.get('/me', auth, getUser);
+router.get('/me', auth, getUser)
 
-module.exports = router;
+module.exports = router

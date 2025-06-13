@@ -14,14 +14,20 @@ const app = express()
 
 // Middleware
 app.use(cors());
+// app.use(cors({
+//   origin: 'http://localhost:3000', // Ajusta según tu frontend
+//   credentials: true, // Si usas cookies, también activa esto
+// }));
 app.use(express.json())
 app.use(morgan('dev'))
 
 //public directory
 app.use(express.static( 'public' ))
 
-// Rutas
+// Routes authentication
 app.use('/api/auth', require('./routes/authRoutes'));
+
+app.use('/api/users', require('./routes/usersRoute'))
 
 //Public route
 app.use('*',(req, res) => {
