@@ -1,7 +1,8 @@
-const User = require('../models/User');
-const bcrypt = require('bcryptjs');
-const jwt = require('jsonwebtoken');
-const { validationResult } = require('express-validator');
+const User = require('../models/User')
+const bcrypt = require('bcryptjs')
+const jwt = require('jsonwebtoken')
+const { validationResult } = require('express-validator')
+const { sendWelcomeEmail } = require('../utils/emailService')
 
 // Registrar usuario
 const registerUser = async (req, res) => {
@@ -22,6 +23,13 @@ const registerUser = async (req, res) => {
       details: details || {},
     });
     await user.save();
+
+    // ✅ Enviar correo de bienvenida sin bloquear la respuesta
+    console.log(`🟡 Enviando correo a ${user.email}...`);
+    await sendWelcomeEmail(user.email, user.name)
+      .then(() => console.log(`✉️ Correo enviado a ${user.email}`))
+      .catch(err => console.error(`❌ Error al enviar correo a ${user.email}:`, err));
+
     const payload = { user: { id: user.id, role: user.role,  } };
     const token = jwt.sign(payload, process.env.JWT_SECRET, { expiresIn: '365d' });
     res.json({
