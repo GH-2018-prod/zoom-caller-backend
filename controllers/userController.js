@@ -26,7 +26,7 @@ const registerUser = async (req, res) => {
 
     // ✅ Enviar correo de bienvenida sin bloquear la respuesta
     console.log(`🟡 Enviando correo a ${user.email}...`);
-    await sendWelcomeEmail(user.email, user.name)
+    sendWelcomeEmail(user.email, user.name)
       .then(() => console.log(`✉️ Correo enviado a ${user.email}`))
       .catch(err => console.error(`❌ Error al enviar correo a ${user.email}:`, err));
 

@@ -2,17 +2,18 @@ require('dotenv').config();
 const nodemailer = require('nodemailer');
 
 // 1) Configura el transporter con SMTP de Gmail
+const isDev = process.env.NODE_ENV !== 'production';
 const transporter = nodemailer.createTransport({
   host: process.env.EMAIL_HOST,            // smtp.gmail.com
   port: Number(process.env.EMAIL_PORT),    // 587
   secure: false,                           // usa TLS
+  requireTLS: true,                        // fuerza STARTTLS
+  family: 4,                               // preferir IPv4
   auth: {
     user: process.env.EMAIL_USER,          // tuCuenta@gmail.com
     pass: process.env.EMAIL_PASS,          // contraseña de app de Google
   },
-  tls: {
-    rejectUnauthorized: false,  // ← AÑADE ESTO
-  },
+  ...(isDev ? { tls: { rejectUnauthorized: false } } : {}), // ← solo en dev
 });
 
 // 2) Verifica conexión (opcional, al iniciar la app)
