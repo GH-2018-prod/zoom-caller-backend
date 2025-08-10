@@ -25,7 +25,6 @@ const registerUser = async (req, res) => {
     await user.save();
 
     // ✅ Enviar correo de bienvenida sin bloquear la respuesta
-    console.log(`🟡 Enviando correo a ${user.email}...`);
     sendWelcomeEmail(user.email, user.name)
       .then(() => console.log(`✉️ Correo enviado a ${user.email}`))
       .catch(err => console.error(`❌ Error al enviar correo a ${user.email}:`, err));
@@ -129,5 +128,28 @@ const findUser = async (req, res) => {
   }
 };
 
+// Cambiar contraseña
+const changePassword = async (req, res) => {
+  try {
+    const { currentPassword, newPassword } = req.body;
+    const userId = req.user.id;
 
-module.exports = { registerUser, loginUser, getUser, getUsers, updateUser, findUser, deleteUser };
+    const user = await User.findById(userId);
+    if (!user) return res.status(404).json({ msg: 'Usuario no encontrado' });
+
+    const isMatch = await user.comparePassword(currentPassword);
+    if (!isMatch) return res.status(400).json({ msg: 'Contraseña actual incorrecta' });
+
+    user.password = newPassword; // el hash lo hace el pre-save
+    await user.save();
+
+    res.json({ msg: 'Contraseña actualizada correctamente' });
+  } catch (err) {
+    console.error('Error al cambiar contraseña:', err);
+    res.status(500).json({ msg: 'Error en el servidor' });
+  }
+};
+
+
+
+module.exports = { registerUser, loginUser, getUser, getUsers, updateUser, findUser, deleteUser, changePassword };

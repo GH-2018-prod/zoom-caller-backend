@@ -8,15 +8,15 @@ const connectDB = require('./config/db')
 //Config
 dotenv.config()
 connectDB()
-console.log('ENV CHECK → EMAIL_HOST:', process.env.EMAIL_HOST);
-console.log('ENV CHECK → EMAIL_PORT:', process.env.EMAIL_PORT);
-console.log('ENV CHECK → EMAIL_USER:', process.env.EMAIL_USER);
+console.log('ENV CHECK → EMAIL_HOST:', process.env.EMAIL_HOST)
+console.log('ENV CHECK → EMAIL_PORT:', process.env.EMAIL_PORT)
+console.log('ENV CHECK → EMAIL_USER:', process.env.EMAIL_USER)
 
 //App
 const app = express()
 
 // Middleware
-app.use(cors());
+app.use(cors())
 // app.use(cors({
 //   origin: 'http://localhost:3000', // Ajusta según tu frontend
 //   credentials: true, // Si usas cookies, también activa esto
@@ -28,7 +28,7 @@ app.use(morgan('dev'))
 app.use(express.static( 'public' ))
 
 // Routes authentication
-app.use('/api/auth', require('./routes/authRoutes'));
+app.use('/api/auth', require('./routes/authRoutes'))
 
 app.use('/api/users', require('./routes/usersRoute'))
 
