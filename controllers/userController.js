@@ -52,7 +52,8 @@ const loginUser = async (req, res) => {
     const isMatch = await bcrypt.compare(password, user.password);
     if (!isMatch) return res.status(400).json({ msg: 'Credenciales inválidas' });
 
-    const payload = { id: user.id, role: user.role };
+    //const payload = { id: user.id, role: user.role };
+    const payload = { user: { id: user.id, role: user.role,  } };
     const token = jwt.sign(payload, process.env.JWT_SECRET, { expiresIn: '365d' });
 
     res.json({ token, user: { id: user.id, name: user.name, email: user.email, role: user.role, active: user.active, details: user.details } });
@@ -130,25 +131,77 @@ const findUser = async (req, res) => {
 
 // Cambiar contraseña
 const changePassword = async (req, res) => {
+  
   try {
-    const { currentPassword, newPassword } = req.body;
-    const userId = req.user.id;
+     const userId = req.user; // viene del middleware auth
+   console.log(userId)
+    
+//     const { currentPassword, newPassword } = req.body;
 
-    const user = await User.findById(userId);
-    if (!user) return res.status(404).json({ msg: 'Usuario no encontrado' });
+//     // Validar que los campos existan
+//     if (!currentPassword || !newPassword) {
+//       return res.status(400).json({ msg: 'Todos los campos son obligatorios' });
+//     }
 
-    const isMatch = await user.comparePassword(currentPassword);
-    if (!isMatch) return res.status(400).json({ msg: 'Contraseña actual incorrecta' });
+//     // Buscar usuario
+//     const user = await User.findById(userId);
+//     if (!user) {
+//       return res.status(404).json({ msg: 'Usuario no encontrado' });
+//     }
 
-    user.password = newPassword; // el hash lo hace el pre-save
-    await user.save();
+//     // Comparar la contraseña actual
+//     const isMatch = await user.comparePassword(currentPassword);
+//     if (!isMatch) {
+//       return res.status(400).json({ msg: 'Contraseña actual incorrecta' });
+//     }
 
-    res.json({ msg: 'Contraseña actualizada correctamente' });
+//     // Actualizar con la nueva (se hashea en el pre('save'))
+//     user.password = newPassword;
+//     console.log("ANTES DE GUARDAR:", user.password);
+//     await user.save();
+//     console.log("DESPUÉS DE GUARDAR:", user.password);
+//     const updatedUser = await User.findById(user.id);
+// console.log("EN DB:", updatedUser.password);
+
+//     // Generar nuevo token (para mantener login válido)
+//     const token = jwt.sign(
+//       { user: { id: user.id, role: user.role } },
+//       process.env.JWT_SECRET,
+//       { expiresIn: '1h' }
+//     );
+
+//     res.json({
+//       msg: 'Contraseña actualizada correctamente',
+//       token,
+//       user: { id: user.id, name: user.name, email: user.email, role: user.role }
+//     });
   } catch (err) {
     console.error('Error al cambiar contraseña:', err);
     res.status(500).json({ msg: 'Error en el servidor' });
   }
 };
+
+// Cambiar contraseña
+// const changePassword = async (req, res) => {
+//   try {
+//     const { currentPassword, newPassword } = req.body;
+//     const userId = req.user.id;
+
+//     const user = await User.findById(userId);
+//     if (!user) return res.status(404).json({ msg: 'Usuario no encontrado' });
+
+//     const isMatch = await user.comparePassword(currentPassword);
+//     if (!isMatch) return res.status(400).json({ msg: 'Contraseña actual incorrecta' });
+
+//     user.password = newPassword; // el hash lo hace el pre-save
+//     await user.save();
+
+//     res.json({ msg: 'Contraseña actualizada correctamente' });
+//   } catch (err) {
+//     console.error('Error al cambiar contraseña:', err);
+//     res.status(500).json({ msg: 'Error en el servidor' });
+//   }
+// };
 
 
 
