@@ -52,8 +52,8 @@ const loginUser = async (req, res) => {
     const isMatch = await bcrypt.compare(password, user.password);
     if (!isMatch) return res.status(400).json({ msg: 'Credenciales inválidas' });
 
-    //const payload = { id: user.id, role: user.role };
-    const payload = { user: { id: user.id, role: user.role,  } };
+    //const payload = { user: { id: user.id, role: user.role,  } };
+    const payload = { id: user.id, role: user.role };
     const token = jwt.sign(payload, process.env.JWT_SECRET, { expiresIn: '365d' });
 
     res.json({ token, user: { id: user.id, name: user.name, email: user.email, role: user.role, active: user.active, details: user.details } });
