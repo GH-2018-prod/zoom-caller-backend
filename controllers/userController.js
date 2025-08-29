@@ -47,13 +47,16 @@ const loginUser = async (req, res) => {
 
   try {
     let user = await User.findOne({ email });
-    if (!user) return res.status(400).json({ msg: 'Credenciales inválidas' });
+    if (!user) return res.status(400).json({ msg: 'Credenciales inválidas(no user found)' });
 
-    const isMatch = await bcrypt.compare(password, user.password);
-    if (!isMatch) return res.status(400).json({ msg: 'Credenciales inválidas' });
+    // const isMatch = await bcrypt.compare(password, user.password);
+    // if (!isMatch) return res.status(400).json({ msg: 'Credenciales inválidas (pass)' });
 
-    //const payload = { user: { id: user.id, role: user.role,  } };
-    const payload = { id: user.id, role: user.role };
+    const isMatch = user.comparePassword(password);
+if (!isMatch) return res.status(400).json({ msg: 'Credenciales inválidas' });
+
+    const payload = { user: { id: user.id, role: user.role,  } };
+    //const payload = { id: user.id, role: user.role };
     const token = jwt.sign(payload, process.env.JWT_SECRET, { expiresIn: '365d' });
 
     res.json({ token, user: { id: user.id, name: user.name, email: user.email, role: user.role, active: user.active, details: user.details } });
@@ -133,7 +136,7 @@ const findUser = async (req, res) => {
 const changePassword = async (req, res) => {
   
   try {
-     const userId = req.user; // viene del middleware auth
+     const userId = req.user.id; // viene del middleware auth
    console.log(userId)
     
 //     const { currentPassword, newPassword } = req.body;
