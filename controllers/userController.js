@@ -12,12 +12,10 @@ const registerUser = async (req, res) => {
   try {
     let user = await User.findOne({ email });
     if (user) return res.status(400).json({ msg: 'El usuario ya existe' });
-    const salt = await bcrypt.genSalt(10);
-    const hashedPassword = await bcrypt.hash(password, salt);
     user = new User({
       name,
       email,
-      password: hashedPassword,
+      password,
       role: role || 'student',
       active: active ?? true,
       details: details || {},
@@ -37,6 +35,7 @@ const registerUser = async (req, res) => {
       //user: { id: user.id, name: user.name, email: user.email, role: user.role }
     });
   } catch (error) {
+    console.error('Error en registerUser:', error);
     res.status(500).send('Error en el servidor');
   }
 };
@@ -49,18 +48,15 @@ const loginUser = async (req, res) => {
     let user = await User.findOne({ email });
     if (!user) return res.status(400).json({ msg: 'Credenciales inválidas(no user found)' });
 
-    // const isMatch = await bcrypt.compare(password, user.password);
-    // if (!isMatch) return res.status(400).json({ msg: 'Credenciales inválidas (pass)' });
-
-    const isMatch = user.comparePassword(password);
-if (!isMatch) return res.status(400).json({ msg: 'Credenciales inválidas' });
+    const isMatch = await user.comparePassword(password);
+if (!isMatch) return res.status(400).json({ msg: 'Credenciales inválidas (contraseña)' });
 
     const payload = { user: { id: user.id, role: user.role,  } };
-    //const payload = { id: user.id, role: user.role };
     const token = jwt.sign(payload, process.env.JWT_SECRET, { expiresIn: '365d' });
 
     res.json({ token, user: { id: user.id, name: user.name, email: user.email, role: user.role, active: user.active, details: user.details } });
   } catch (error) {
+    console.error('Error en loginUser:', error);
     res.status(500).send('Error en el servidor');
   }
 };
@@ -136,76 +132,47 @@ const findUser = async (req, res) => {
 const changePassword = async (req, res) => {
   
   try {
-     const userId = req.user.id; // viene del middleware auth
-   console.log(userId)
+    const userId = req.user.id; // viene del middleware auth
     
-//     const { currentPassword, newPassword } = req.body;
+    const { currentPassword, newPassword } = req.body;
 
-//     // Validar que los campos existan
-//     if (!currentPassword || !newPassword) {
-//       return res.status(400).json({ msg: 'Todos los campos son obligatorios' });
-//     }
+    // Validar que los campos existan
+    if (!currentPassword || !newPassword) {
+      return res.status(400).json({ msg: 'Todos los campos son obligatorios' });
+    }
 
-//     // Buscar usuario
-//     const user = await User.findById(userId);
-//     if (!user) {
-//       return res.status(404).json({ msg: 'Usuario no encontrado' });
-//     }
+    // Buscar usuario
+    const user = await User.findById(userId);
+    if (!user) {
+      return res.status(404).json({ msg: 'Usuario no encontrado' });
+    }
 
-//     // Comparar la contraseña actual
-//     const isMatch = await user.comparePassword(currentPassword);
-//     if (!isMatch) {
-//       return res.status(400).json({ msg: 'Contraseña actual incorrecta' });
-//     }
+    // Comparar la contraseña actual
+    const isMatch = await user.comparePassword(currentPassword);
+    if (!isMatch) {
+      return res.status(400).json({ msg: 'Contraseña actual incorrecta' });
+    }
 
-//     // Actualizar con la nueva (se hashea en el pre('save'))
-//     user.password = newPassword;
-//     console.log("ANTES DE GUARDAR:", user.password);
-//     await user.save();
-//     console.log("DESPUÉS DE GUARDAR:", user.password);
-//     const updatedUser = await User.findById(user.id);
-// console.log("EN DB:", updatedUser.password);
+    // Actualizar con la nueva (se hashea en el pre('save'))
+    user.password = newPassword;
+    await user.save();
 
-//     // Generar nuevo token (para mantener login válido)
-//     const token = jwt.sign(
-//       { user: { id: user.id, role: user.role } },
-//       process.env.JWT_SECRET,
-//       { expiresIn: '1h' }
-//     );
+    // Generar nuevo token (para mantener login válido)
+    const token = jwt.sign(
+      { user: { id: user.id, role: user.role } },
+      process.env.JWT_SECRET,
+      { expiresIn: '1h' }
+    );
 
-//     res.json({
-//       msg: 'Contraseña actualizada correctamente',
-//       token,
-//       user: { id: user.id, name: user.name, email: user.email, role: user.role }
-//     });
+    res.json({
+      msg: 'Contraseña actualizada correctamente',
+      token,
+      user: { id: user.id, name: user.name, email: user.email, role: user.role }
+    });
   } catch (err) {
     console.error('Error al cambiar contraseña:', err);
     res.status(500).json({ msg: 'Error en el servidor' });
   }
 };
-
-// Cambiar contraseña
-// const changePassword = async (req, res) => {
-//   try {
-//     const { currentPassword, newPassword } = req.body;
-//     const userId = req.user.id;
-
-//     const user = await User.findById(userId);
-//     if (!user) return res.status(404).json({ msg: 'Usuario no encontrado' });
-
-//     const isMatch = await user.comparePassword(currentPassword);
-//     if (!isMatch) return res.status(400).json({ msg: 'Contraseña actual incorrecta' });
-
-//     user.password = newPassword; // el hash lo hace el pre-save
-//     await user.save();
-
-//     res.json({ msg: 'Contraseña actualizada correctamente' });
-//   } catch (err) {
-//     console.error('Error al cambiar contraseña:', err);
-//     res.status(500).json({ msg: 'Error en el servidor' });
-//   }
-// };
-
-
 
 module.exports = { registerUser, loginUser, getUser, getUsers, updateUser, findUser, deleteUser, changePassword };
