@@ -25,7 +25,7 @@ app.use(express.json())
 app.use(morgan('dev'))
 
 //public directory
-app.use(express.static( 'public' ))
+//app.use(express.static( 'public' ))
 
 // Routes authentication
 app.use('/api/auth', require('./routes/authRoutes'))
