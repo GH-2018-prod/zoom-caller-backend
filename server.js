@@ -24,15 +24,14 @@ app.use(cors())
 app.use(express.json())
 app.use(morgan('dev'))
 
-//public directory
-//app.use(express.static( 'public' ))
-
 // Routes authentication
 app.use('/api/auth', require('./routes/authRoutes'))
-
 app.use('/api/users', require('./routes/usersRoute'))
 
-//Public route
+//public directory
+app.use(express.static(path.join(__dirname, 'public')));
+
+//Public route 
 app.use('*',(req, res) => {
   res.sendFile(path.join(__dirname, 'public/index.html'))
 })
