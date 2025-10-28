@@ -1,4 +1,11 @@
- require('dotenv').config();
+//  require('dotenv').config();
+if (process.env.NODE_ENV !== 'production') {
+  require('dotenv').config();
+}
+
+console.log("RESEND_API_KEY:", process.env.RESEND_API_KEY ? "✔️ cargada" : "❌ no definida");
+
+
 
 const { Resend } = require('resend');
 const resend = new Resend(process.env.RESEND_API_KEY);
