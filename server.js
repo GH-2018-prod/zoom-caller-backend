@@ -8,9 +8,6 @@ const connectDB = require('./config/db')
 //Config
 dotenv.config()
 connectDB()
-console.log('ENV CHECK → EMAIL_HOST:', process.env.EMAIL_HOST)
-console.log('ENV CHECK → EMAIL_PORT:', process.env.EMAIL_PORT)
-console.log('ENV CHECK → EMAIL_USER:', process.env.EMAIL_USER)
 
 //App
 const app = express()

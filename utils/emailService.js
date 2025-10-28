@@ -1,49 +1,35 @@
-require('dotenv').config();
-const nodemailer = require('nodemailer');
+ require('dotenv').config();
 
-// 1) Configura el transporter con SMTP de Gmail
-const isDev = process.env.NODE_ENV !== 'production';
-const transporter = nodemailer.createTransport({
-  host: process.env.EMAIL_HOST,            // smtp.gmail.com
-  port: Number(process.env.EMAIL_PORT),    // 587
-  secure: false,                           // usa TLS
-  requireTLS: true,                        // fuerza STARTTLS
-  family: 4,                               // preferir IPv4
-  auth: {
-    user: process.env.EMAIL_USER,          // tuCuenta@gmail.com
-    pass: process.env.EMAIL_PASS,          // contraseña de app de Google
-  },
-  ...(isDev ? { tls: { rejectUnauthorized: false } } : {}), // ← solo en dev
-});
+const { Resend } = require('resend');
+const resend = new Resend(process.env.RESEND_API_KEY);
 
-// 2) Verifica conexión (opcional, al iniciar la app)
-transporter.verify()
-  .then(() => console.log('✅ SMTP Gmail listo para enviar'))
-  .catch(err => console.error('❌ Error SMTP Gmail:', err));
+/**
+ * Enviar correo de bienvenida con Resend
+ * @param {string} to - Email del destinatario
+ * @param {string} name - Nombre del usuario
+ */
+const sendWelcomeEmail = async (to, name) => {
+  try {
+    const { data, error } = await resend.emails.send({
+      from: 'Zoom Caller <onboarding@resend.dev>', // 👉 puedes usar un dominio verificado o "onresend.com"
+      to,
+      subject: '🎉 ¡Bienvenido a Zoom Caller!',
+      html: `
+        <div style="font-family: Arial; text-align: center;">
+          <h2>¡Hola, ${name}!</h2>
+          <p>Gracias por registrarte en nuestra plataforma 🎓</p>
+          <p>Esperamos que disfrutes de todas las funciones.</p>
+          <br />
+          <small>© ${new Date().getFullYear()} Zoom Caller</small>
+        </div>
+      `,
+    });
 
-// 3) Función concreta para enviar email de bienvenida
-async function sendWelcomeEmail(to, nombre) {
-  const mailOptions = {
-    from: `"Tu App" <${process.env.EMAIL_USER}>`,
-    to,                                      // email del nuevo usuario
-    subject: '¡Bienvenido a Tu App!',
-    html: `
-      <div style="font-family: sans-serif; line-height: 1.5;">
-        <h2>Hola ${nombre},</h2>
-        <p>¡Gracias por registrarte en nuestra plataforma!</p>
-        <p>Para iniciar sesión, haz clic aquí:
-          <a href="https://tuapp.com/login">Iniciar Sesión</a>
-        </p>
-        <hr/>
-        <p style="font-size: 0.8em; color: #666;">
-          Si no creaste esta cuenta, ignora este correo.
-        </p>
-      </div>
-    `,
-  };
-
-  // 4) Envía el correo y retorna la promesa
-  return transporter.sendMail(mailOptions);
-}
+    if (error) throw error;
+    console.log(`✅ Correo enviado a ${to}`, data);
+  } catch (err) {
+    console.error(`❌ Error al enviar correo a ${to}:`, err);
+  }
+};
 
 module.exports = { sendWelcomeEmail };
