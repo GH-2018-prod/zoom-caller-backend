@@ -25,8 +25,14 @@ app.use(morgan('dev'))
 app.use('/api/auth', require('./routes/authRoutes'))
 app.use('/api/users', require('./routes/usersRoute'))
 
+//Upload Route
+app.use('/api', require('./routes/uploadRoutes'))
+
+//Images Route
+app.use('/api', require('./routes/imageRoutes'));
+
 //public directory
-app.use(express.static(path.join(__dirname, 'public')));
+app.use(express.static(path.join(__dirname, 'public')))
 
 //Public route 
 app.use('*',(req, res) => {
