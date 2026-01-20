@@ -5,10 +5,9 @@ const router = express.Router();
 
 // Endpoint para subir imagen 
  
-router.post('/upload', upload.single('image'), auth, async (req, res) => {
+router.post('/upload',  upload.single('image'), auth, async (req, res) => {
  
   try {
-console.log('llega hasta aca')
     if (!req.file) {
         return res.status(400).json({ message: 'No se envió ninguna imagen' });
       }
@@ -25,6 +24,19 @@ console.log('llega hasta aca')
 // export default router
 module.exports = router
 
+// FIX ADICIONAL (RECOMENDADO)
+
+// Cambia la ruta para capturar errores reales:
+// router.post('/upload', auth, (req, res) => {
+//   upload.single('image')(req, res, (err) => {
+//     if (err) {
+//       console.error('UPLOAD ERROR:', err);
+//       return res.status(500).json({ message: err.message });
+//     }
+
+//     res.json({ imageUrl: req.file.path });
+//   });
+// });
 
 // const express = require('express');
 // const upload = require('../config/multer');
