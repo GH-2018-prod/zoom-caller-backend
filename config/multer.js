@@ -17,11 +17,11 @@ const cloudinary = require('./cloudinary');
 
 const storage = new CloudinaryStorage({
   cloudinary,
-  params: {
+  params: (req, file) => ({
     folder: 'mern_uploads',
     resource_type: 'image',
-    //format: file.mimetype.split('/')[1],
-  },
+    format: file.mimetype.split('/')[1],
+  }),
 });
 
 const upload = multer({ storage });
