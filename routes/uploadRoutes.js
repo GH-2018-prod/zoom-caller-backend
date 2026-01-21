@@ -5,7 +5,7 @@ const router = express.Router();
 
 // Endpoint para subir imagen 
  
-router.post('/upload',  upload.single('image'), auth, async (req, res) => {
+router.post('/upload',  auth, upload.single('image'), async (req, res) => {
  
   try {
     if (!req.file) {
