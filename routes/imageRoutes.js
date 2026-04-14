@@ -32,22 +32,6 @@ router.get('/images', auth, async (req, res) => {
   }
 });
 
-//FETCH IMAGES
-// router.get('/images', auth, async (req, res) => {
-//   try {
-//     let query = {}; 
-//     if (req.user.role !== 'admin') {
-//       query.user = req.user.id
-//     }
-//     const images = await Image.find(query)
-//       .populate('user', 'name email role')
-//       .sort({ createdAt: -1 })
-//     res.json(images)
-//   } catch (error) {
-//     res.status(500).json({ message: 'Error obteniendo imágenes' })
-//   }
-// })
-
 // DELETE
 router.delete('/images/:id', auth, async (req, res) => {
   try {

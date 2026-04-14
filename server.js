@@ -36,6 +36,9 @@ app.use('/api', require('./routes/uploadRoutes'))
 //Images Route
 app.use('/api', require('./routes/imageRoutes'));
 
+//Links Route
+app.use('/api', require('./routes/link'));
+
 //public directory
 app.use(express.static(path.join(__dirname, 'public')))
 
@@ -43,6 +46,7 @@ app.use(express.static(path.join(__dirname, 'public')))
 app.use('*',(req, res) => {
   res.sendFile(path.join(__dirname, 'public/index.html'))
 })
+console.log(__dirname)
 
 app.get('/', (req, res) => {
   res.send('API funcionando 🚀')
