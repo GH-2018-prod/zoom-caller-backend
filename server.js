@@ -13,16 +13,21 @@ connectDB()
 const app = express()
 
 // Middleware
-app.use(cors())
-// app.use(cors({
-//   origin: 'http://localhost:3000', // Ajusta según tu frontend
-//   credentials: true, // Si usas cookies, también activa esto
-// }));
-// app.use(cors({
-//   origin: '*',
-//   methods: ['GET', 'POST', 'PUT', 'DELETE'],
-//   allowedHeaders: ['Content-Type', 'Authorization'],
-// }));
+// ALLOWED_ORIGINS: lista separada por comas con el/los dominios del frontend
+// (ej: "https://mi-academia.vercel.app,https://www.mi-academia.com").
+// Si no está seteada, se permite cualquier origen (comportamiento anterior)
+// para no romper despliegues existentes, pero queda avisado en el log.
+const allowedOrigins = process.env.ALLOWED_ORIGINS?.split(',').map((o) => o.trim())
+
+if (allowedOrigins?.length) {
+  app.use(cors({ origin: allowedOrigins }))
+} else {
+  console.warn(
+    'ALLOWED_ORIGINS no está configurada: aceptando requests de cualquier origen. ' +
+    'Configurala en el .env de producción con el dominio real del frontend.'
+  )
+  app.use(cors())
+}
 app.use(express.json())
 app.use(morgan('dev'))
 
@@ -42,15 +47,10 @@ app.use('/api', require('./routes/link'));
 //public directory
 app.use(express.static(path.join(__dirname, 'public')))
 
-//Public route 
+//Public route
 app.use('*',(req, res) => {
   res.sendFile(path.join(__dirname, 'public/index.html'))
 })
-console.log(__dirname)
-
-app.get('/', (req, res) => {
-  res.send('API funcionando 🚀')
-});
 
 const PORT = process.env.PORT || 5000
 app.listen(PORT, () => console.log(`Servidor corriendo en http://localhost:${PORT}`))

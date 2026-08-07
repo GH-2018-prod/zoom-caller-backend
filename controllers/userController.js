@@ -4,6 +4,10 @@ const jwt = require('jsonwebtoken')
 const { validationResult } = require('express-validator')
 const { sendWelcomeEmail } = require('../utils/emailService')
 
+// Tokens de larga duracion (antes 365d) sin refresh token detras.
+// Configurable via env para poder ajustarlo sin tocar codigo.
+const JWT_EXPIRES_IN = process.env.JWT_EXPIRES_IN || '30d'
+
 // Registrar usuario
 const registerUser = async (req, res) => {
   const errors = validationResult(req);
@@ -28,7 +32,7 @@ const registerUser = async (req, res) => {
       .catch(err => console.error(`❌ Error al enviar correo a ${user.email}:`, err));
 
     const payload = { user: { id: user.id, role: user.role,  } };
-    const token = jwt.sign(payload, process.env.JWT_SECRET, { expiresIn: '365d' });
+    const token = jwt.sign(payload, process.env.JWT_SECRET, { expiresIn: JWT_EXPIRES_IN });
     res.json({
       token,
       user: { id: user.id, name: user.name, email: user.email, role: user.role, active: user.active, details: user.details }
@@ -42,6 +46,9 @@ const registerUser = async (req, res) => {
 
 // Iniciar sesión
 const loginUser = async (req, res) => {
+  const errors = validationResult(req);
+  if (!errors.isEmpty()) return res.status(400).json({ errors: errors.array() });
+
   const { email, password } = req.body;
 
   try {
@@ -52,7 +59,7 @@ const loginUser = async (req, res) => {
 if (!isMatch) return res.status(400).json({ msg: 'Credenciales inválidas (contraseña)' });
 
     const payload = { user: { id: user.id, role: user.role,  } };
-    const token = jwt.sign(payload, process.env.JWT_SECRET, { expiresIn: '365d' });
+    const token = jwt.sign(payload, process.env.JWT_SECRET, { expiresIn: JWT_EXPIRES_IN });
 
     res.json({ token, user: { id: user.id, name: user.name, email: user.email, role: user.role, active: user.active, details: user.details } });
   } catch (error) {
@@ -73,8 +80,24 @@ const getUser = async (req, res) => {
 
 const getUsers = async (req, res) => {
   try {
-    const users = await User.find();
+    const users = await User.find().select('-password');
     res.status(200).json(users);
+  } catch (error) {
+    res.status(500).json({ message: 'Server error' });
+  }
+};
+
+// Estudiantes de UN profesor puntual (no todos los usuarios de la
+// academia). A diferencia de getUsers (admin-only), esto es lo que un
+// profesor puede llamar sin ver datos de estudiantes que no son suyos.
+const getMyStudents = async (req, res) => {
+  try {
+    const teacherId = req.user.id;
+    const students = await User.find({
+      role: 'student',
+      'details.teacherId': teacherId,
+    }).select('-password');
+    res.status(200).json(students);
   } catch (error) {
     res.status(500).json({ message: 'Server error' });
   }
@@ -121,7 +144,7 @@ const deleteUser = async (req, res) => {
 const findUser = async (req, res) => {
   try {
     const { id } = req.params;
-    const users = await User.findById( id );
+    const users = await User.findById(id).select('-password');
     res.status(200).json(users);
   } catch (error) {
     res.status(500).json({ message: 'Server error' });
@@ -175,4 +198,4 @@ const changePassword = async (req, res) => {
   }
 };
 
-module.exports = { registerUser, loginUser, getUser, getUsers, updateUser, findUser, deleteUser, changePassword };
+module.exports = { registerUser, loginUser, getUser, getUsers, getMyStudents, updateUser, findUser, deleteUser, changePassword };

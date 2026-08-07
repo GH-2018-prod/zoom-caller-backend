@@ -7,4 +7,12 @@ console.log('Verificando acceso admin para:', req.user?.email);
   }
 };
 
-module.exports = { adminOnly };
+const teacherOrAdminOnly = (req, res, next) => {
+  if (req.user && ['teacher', 'admin'].includes(req.user.role)) {
+    next();
+  } else {
+    return res.status(403).json({ message: 'Acceso denegado: se requiere rol profesor o admin' });
+  }
+};
+
+module.exports = { adminOnly, teacherOrAdminOnly };
