@@ -44,6 +44,12 @@ app.use('/api', require('./routes/imageRoutes'));
 //Links Route
 app.use('/api', require('./routes/link'));
 
+//Expenses Route
+app.use('/api', require('./routes/expenseRoutes'))
+
+//Payments Route
+app.use('/api', require('./routes/paymentRoutes'))
+
 //public directory
 app.use(express.static(path.join(__dirname, 'public')))
 
