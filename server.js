@@ -4,6 +4,7 @@ const dotenv = require('dotenv')
 const cors = require('cors')
 const morgan = require('morgan')
 const connectDB = require('./config/db')
+const { startReminderJobs } = require('./utils/reminders')
 
 //Config
 dotenv.config()
@@ -49,6 +50,11 @@ app.use('/api', require('./routes/expenseRoutes'))
 
 //Payments Route
 app.use('/api', require('./routes/paymentRoutes'))
+
+//Push notifications Route
+app.use('/api', require('./routes/pushRoutes'))
+
+startReminderJobs()
 
 //public directory
 app.use(express.static(path.join(__dirname, 'public')))
