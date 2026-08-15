@@ -38,6 +38,28 @@ router.post('/expenses', protect, adminOnly, async (req, res) => {
   }
 })
 
+// ACTUALIZAR gasto — hoy solo se usa para silenciar/reactivar la alerta
+// (solo admin)
+router.put('/expenses/:id', protect, adminOnly, async (req, res) => {
+  try {
+    const { alertsDisabled } = req.body
+
+    const expense = await Expense.findByIdAndUpdate(
+      req.params.id,
+      { alertsDisabled: Boolean(alertsDisabled) },
+      { new: true, runValidators: true }
+    )
+
+    if (!expense) {
+      return res.status(404).json({ message: 'Gasto no encontrado' })
+    }
+
+    res.json(expense)
+  } catch (error) {
+    res.status(500).json({ message: 'Error actualizando gasto' })
+  }
+})
+
 // BORRAR gasto (solo admin)
 router.delete('/expenses/:id', protect, adminOnly, async (req, res) => {
   try {
