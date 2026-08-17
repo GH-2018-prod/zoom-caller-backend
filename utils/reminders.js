@@ -44,9 +44,13 @@ const getNextMeetingDate = (day, time) => {
 // Avisa 30 min antes de cada clase. Corre cada 5 min y solo dispara
 // cuando faltan entre 25 y 30 min — evita mandar el mismo aviso varias
 // veces mientras dura la ventana (asume que el cron no se salta ticks).
+// Tambien le avisa al profesor de esa clase — no solo al estudiante —
+// pero una sola vez por profesor+horario aunque tenga varios estudiantes
+// en el mismo grupo, para no duplicarle el aviso.
 const checkClassReminders = async () => {
   try {
     const students = await User.find({ role: 'student' })
+    const notifiedTeacherSlots = new Set()
 
     for (const student of students) {
       const schedule = student.details?.schedule || []
@@ -58,10 +62,29 @@ const checkClassReminders = async () => {
         const diffMin = Math.floor((meetingDate.getTime() - Date.now()) / 60000)
 
         if (diffMin >= 25 && diffMin < 30) {
+          // Tag = mismo horario semanal (dia + hora). Si el servicio de
+          // push reintenta el mismo envio, la notificacion se reemplaza en
+          // vez de apilarse — ver client/src/sw.js.
+          const tag = `class-${entry.day}-${entry.time}`
+
           await sendPushToUser(student._id, {
             title: 'Tu clase empieza pronto',
             body: `Tu clase de las ${entry.time} arranca en ${diffMin} minutos.`,
+            tag,
           })
+
+          const teacherId = student.details?.teacherId
+          if (teacherId) {
+            const slotKey = `${teacherId}-${entry.day}-${entry.time}`
+            if (!notifiedTeacherSlots.has(slotKey)) {
+              notifiedTeacherSlots.add(slotKey)
+              await sendPushToUser(teacherId, {
+                title: 'Tu clase empieza pronto',
+                body: `Tu clase de las ${entry.time} arranca en ${diffMin} minutos.`,
+                tag,
+              })
+            }
+          }
         }
       }
     }
@@ -96,7 +119,11 @@ const checkPaymentReminders = async () => {
           ? 'Tu pago está vencido. Contactá al administrador para regularizarlo.'
           : `Tu pago vence en ${daysLeft} día${daysLeft === 1 ? '' : 's'}.`
 
-      await sendPushToUser(payment.studentId, { title: 'Recordatorio de pago', body })
+      await sendPushToUser(payment.studentId, {
+        title: 'Recordatorio de pago',
+        body,
+        tag: `payment-${payment._id}`,
+      })
     }
   } catch (error) {
     console.error('Error revisando recordatorios de pago:', error.message)
