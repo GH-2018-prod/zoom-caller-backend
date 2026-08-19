@@ -54,6 +54,9 @@ app.use('/api', require('./routes/paymentRoutes'))
 //Push notifications Route
 app.use('/api', require('./routes/pushRoutes'))
 
+//Schedule changes Route (cancelar/reprogramar clases)
+app.use('/api', require('./routes/scheduleChangeRoutes'))
+
 startReminderJobs()
 
 //public directory
