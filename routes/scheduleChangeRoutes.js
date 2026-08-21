@@ -137,6 +137,30 @@ router.post('/schedule-changes/reschedule', protect, async (req, res) => {
   }
 })
 
+// Todos los cambios vigentes (cancelados Y reprogramados, confirmados o
+// no) de los estudiantes relevantes — admin ve todos, profesor solo los
+// suyos. A diferencia de pending-confirmations, esto alimenta la vista
+// agrupada por dia (TeacherCallCard) para que el horario del profe/admin
+// refleje lo que el estudiante ya cambio, no solo lo pendiente de
+// confirmar.
+router.get(
+  '/schedule-changes/students-upcoming',
+  protect,
+  teacherOrAdminOnly,
+  async (req, res) => {
+    try {
+      const filter = { originalDate: { $gte: new Date() } }
+      if (req.user.role === 'teacher') {
+        filter.teacherId = req.user._id
+      }
+      const changes = await ScheduleChange.find(filter)
+      res.json(changes)
+    } catch (error) {
+      res.status(500).json({ message: 'Error obteniendo cambios de horario' })
+    }
+  }
+)
+
 // Cancelaciones de los estudiantes del profesor autenticado que todavia no
 // confirmo (acuse de recibo — no bloquea nada, la cancelacion ya es
 // efectiva desde que el estudiante la hizo).
