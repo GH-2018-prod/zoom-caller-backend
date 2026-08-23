@@ -90,12 +90,15 @@ const getUsers = async (req, res) => {
 // Estudiantes de UN profesor puntual (no todos los usuarios de la
 // academia). A diferencia de getUsers (admin-only), esto es lo que un
 // profesor puede llamar sin ver datos de estudiantes que no son suyos.
+// El profesor es por horario (details.schedule[].teacherId), no por
+// estudiante — se busca tanto ahi como en el viejo details.teacherId
+// (estudiantes creados antes de este cambio que todavia no se editaron).
 const getMyStudents = async (req, res) => {
   try {
     const teacherId = req.user.id;
     const students = await User.find({
       role: 'student',
-      'details.teacherId': teacherId,
+      $or: [{ 'details.teacherId': teacherId }, { 'details.schedule.teacherId': teacherId }],
     }).select('-password');
     res.status(200).json(students);
   } catch (error) {

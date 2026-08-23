@@ -51,7 +51,10 @@ router.post('/schedule-changes/cancel', protect, async (req, res) => {
       {
         studentId: req.user._id,
         studentName: req.user.name,
-        teacherId: req.user.details?.teacherId || null,
+        // El profesor es por horario — si esa entrada todavia no tiene el
+        // suyo (estudiantes de antes de este cambio), se usa el viejo
+        // details.teacherId como respaldo.
+        teacherId: scheduleEntry.teacherId || req.user.details?.teacherId || null,
         action: 'cancelled',
         originalDay: day,
         originalTime: time,
@@ -110,7 +113,7 @@ router.post('/schedule-changes/reschedule', protect, async (req, res) => {
       {
         studentId: req.user._id,
         studentName: req.user.name,
-        teacherId: req.user.details?.teacherId || null,
+        teacherId: scheduleEntry.teacherId || req.user.details?.teacherId || null,
         action: 'rescheduled',
         originalDay: day,
         originalTime: time,
