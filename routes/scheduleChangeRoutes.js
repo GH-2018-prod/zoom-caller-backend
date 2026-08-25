@@ -2,10 +2,10 @@ const express = require('express')
 const router = express.Router()
 
 const ScheduleChange = require('../models/ScheduleChange')
+const RescheduleSlot = require('../models/RescheduleSlot')
 const { protect } = require('../middleware/usersMiddleware')
-const { teacherOrAdminOnly } = require('../middleware/roleMiddleware')
+const { adminOnly, teacherOrAdminOnly } = require('../middleware/roleMiddleware')
 const { getNextMeetingDate } = require('../utils/scheduleTime')
-const { isFixedSlot } = require('../utils/fixedSlots')
 const { sendPushToUser } = require('../utils/pushService')
 
 const CANCELLATION_WINDOW_MS = 60 * 60 * 1000
@@ -95,8 +95,36 @@ router.post('/schedule-changes/reschedule', protect, async (req, res) => {
       return res.status(404).json({ message: 'Ese horario no es parte de tu clase' })
     }
 
-    if (!isFixedSlot(newDay, newTime)) {
+    // Un horario es valido para reprogramar si esta en la lista fija del
+    // admin, O si quedo libre en su horario ORIGINAL porque otro (o el
+    // mismo) estudiante cancelo o reprogramo justo esa clase esta semana.
+    const isFixed = await RescheduleSlot.exists({ day: newDay, time: newTime })
+    const isFreed = await ScheduleChange.exists({
+      action: { $in: ['cancelled', 'rescheduled'] },
+      originalDay: newDay,
+      originalTime: newTime,
+      originalDate: { $gte: new Date() },
+    })
+    if (!isFixed && !isFreed) {
       return res.status(400).json({ message: 'Ese horario no esta disponible' })
+    }
+
+    // El slot puede estar ocupado por otra reprogramacion vigente — salvo
+    // que sea la propia (re-elegir el mismo horario para la misma clase no
+    // cuenta como "ocupado por otro").
+    const occupant = await ScheduleChange.findOne({
+      action: 'rescheduled',
+      newDay,
+      newTime,
+      originalDate: { $gte: new Date() },
+    })
+    const isOwnOccupant =
+      occupant &&
+      occupant.studentId.toString() === req.user._id.toString() &&
+      occupant.originalDay === day &&
+      occupant.originalTime === time
+    if (occupant && !isOwnOccupant) {
+      return res.status(400).json({ message: 'Ese horario ya esta ocupado por otro estudiante' })
     }
 
     const meetingDate = getNextMeetingDate(day, time)
@@ -207,5 +235,80 @@ router.put(
     }
   }
 )
+
+// Horarios disponibles para reprogramar — cualquier usuario autenticado
+// los puede ver (los necesita el selector de reprogramar), solo el admin
+// los administra.
+router.get('/schedule-changes/fixed-slots', protect, async (req, res) => {
+  try {
+    const slots = await RescheduleSlot.find().sort({ day: 1, time: 1 })
+    res.json(slots)
+  } catch (error) {
+    res.status(500).json({ message: 'Error obteniendo horarios disponibles' })
+  }
+})
+
+// Horarios de la lista de fixed-slots que YA estan ocupados por una
+// reprogramacion vigente de otro estudiante — el frontend los saca del
+// selector para no permitir un choque. Se calcula en vivo, asi que un
+// horario reaparece solo al cancelarse la reprogramacion que lo ocupaba
+// (o al pasar su fecha, como cualquier ScheduleChange).
+router.get('/schedule-changes/occupied-slots', protect, async (req, res) => {
+  try {
+    const changes = await ScheduleChange.find({
+      action: 'rescheduled',
+      originalDate: { $gte: new Date() },
+    }).select('newDay newTime')
+    res.json(changes.map((c) => ({ day: c.newDay, time: c.newTime })))
+  } catch (error) {
+    res.status(500).json({ message: 'Error obteniendo horarios ocupados' })
+  }
+})
+
+// Horarios que quedaron libres esta semana en su horario ORIGINAL —
+// porque alguien cancelo esa clase, o porque la reprogramo a otro
+// horario (el original tambien queda vacio, no solo el nuevo). Se suman
+// al pool de horarios disponibles para reprogramar (fixed-slots), sin
+// importar si el que reprograma es el mismo estudiante o cualquier otro.
+router.get('/schedule-changes/freed-slots', protect, async (req, res) => {
+  try {
+    const changes = await ScheduleChange.find({
+      action: { $in: ['cancelled', 'rescheduled'] },
+      originalDate: { $gte: new Date() },
+    }).select('originalDay originalTime')
+    res.json(changes.map((c) => ({ day: c.originalDay, time: c.originalTime })))
+  } catch (error) {
+    res.status(500).json({ message: 'Error obteniendo horarios liberados' })
+  }
+})
+
+router.post('/schedule-changes/fixed-slots', protect, adminOnly, async (req, res) => {
+  try {
+    const { day, time } = req.body
+    if (!day || !time) {
+      return res.status(400).json({ message: 'Dia y hora son obligatorios' })
+    }
+
+    const slot = await RescheduleSlot.create({ day, time })
+    res.status(201).json(slot)
+  } catch (error) {
+    if (error.code === 11000) {
+      return res.status(400).json({ message: 'Ese horario ya esta disponible' })
+    }
+    res.status(500).json({ message: 'Error agregando el horario' })
+  }
+})
+
+router.delete('/schedule-changes/fixed-slots/:id', protect, adminOnly, async (req, res) => {
+  try {
+    const deleted = await RescheduleSlot.findByIdAndDelete(req.params.id)
+    if (!deleted) {
+      return res.status(404).json({ message: 'Horario no encontrado' })
+    }
+    res.json({ message: 'Horario eliminado' })
+  } catch (error) {
+    res.status(500).json({ message: 'Error eliminando el horario' })
+  }
+})
 
 module.exports = router
