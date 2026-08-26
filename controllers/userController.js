@@ -1,10 +1,11 @@
+const crypto = require('crypto')
 const User = require('../models/User')
 const Image = require('../models/Image')
 const bcrypt = require('bcryptjs')
 const jwt = require('jsonwebtoken')
 const cloudinary = require('cloudinary').v2
 const { validationResult } = require('express-validator')
-const { sendWelcomeEmail } = require('../utils/emailService')
+const { sendWelcomeEmail, sendPasswordResetEmail } = require('../utils/emailService')
 
 // Tokens de larga duracion (antes 365d) sin refresh token detras.
 // Configurable via env para poder ajustarlo sin tocar codigo.
@@ -229,4 +230,72 @@ const changePassword = async (req, res) => {
   }
 };
 
-module.exports = { registerUser, loginUser, getUser, getUsers, getMyStudents, updateUser, findUser, deleteUser, changePassword };
+// Pedir link de reseteo (autoservicio, desde "olvidé mi contraseña")
+const forgotPassword = async (req, res) => {
+  const errors = validationResult(req);
+  if (!errors.isEmpty()) return res.status(400).json({ errors: errors.array() });
+
+  try {
+    const { email } = req.body
+    const user = await User.findOne({ email })
+
+    // Respuesta genérica siempre, exista o no el email — si no, cualquiera
+    // podría usar este endpoint para averiguar qué correos están registrados.
+    const genericResponse = {
+      msg: 'Si el correo está registrado, vas a recibir un link para restablecer tu contraseña.',
+    }
+
+    if (!user) {
+      return res.json(genericResponse)
+    }
+
+    const rawToken = crypto.randomBytes(32).toString('hex')
+    // Se guarda el hash del token, no el token en si — igual que una
+    // contraseña, para que una fuga de la base de datos no alcance para
+    // resetear cuentas.
+    user.resetPasswordToken = crypto.createHash('sha256').update(rawToken).digest('hex')
+    user.resetPasswordExpires = Date.now() + 60 * 60 * 1000 // 1 hora
+    await user.save()
+
+    const resetLink = `${process.env.FRONTEND_URL}/reset-password/${rawToken}`
+    await sendPasswordResetEmail(user.email, user.name, resetLink)
+
+    res.json(genericResponse)
+  } catch (error) {
+    console.error('Error en forgotPassword:', error)
+    res.status(500).json({ msg: 'Error en el servidor' })
+  }
+}
+
+// Confirmar reseteo con el token recibido por correo
+const resetPassword = async (req, res) => {
+  const errors = validationResult(req);
+  if (!errors.isEmpty()) return res.status(400).json({ errors: errors.array() });
+
+  try {
+    const { token } = req.params
+    const { password } = req.body
+
+    const hashedToken = crypto.createHash('sha256').update(token).digest('hex')
+    const user = await User.findOne({
+      resetPasswordToken: hashedToken,
+      resetPasswordExpires: { $gt: Date.now() },
+    })
+
+    if (!user) {
+      return res.status(400).json({ msg: 'El link es inválido o ya expiró' })
+    }
+
+    user.password = password // se hashea en el pre('save')
+    user.resetPasswordToken = undefined
+    user.resetPasswordExpires = undefined
+    await user.save()
+
+    res.json({ msg: 'Contraseña actualizada correctamente' })
+  } catch (error) {
+    console.error('Error en resetPassword:', error)
+    res.status(500).json({ msg: 'Error en el servidor' })
+  }
+}
+
+module.exports = { registerUser, loginUser, getUser, getUsers, getMyStudents, updateUser, findUser, deleteUser, changePassword, forgotPassword, resetPassword };

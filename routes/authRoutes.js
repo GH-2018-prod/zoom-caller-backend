@@ -1,6 +1,6 @@
 const express = require('express')
 const rateLimit = require('express-rate-limit')
-const { registerUser, loginUser, getUser, changePassword  } = require('../controllers/userController')
+const { registerUser, loginUser, getUser, changePassword, forgotPassword, resetPassword } = require('../controllers/userController')
 const { check } = require('express-validator')
 const { auth } = require('../middleware/authMiddleware')
 
@@ -47,5 +47,21 @@ router.get('/me', auth, getUser)
 
 //Change password
 router.put('/change-password', auth, changePassword)
+
+// Pedir link de reseteo (autoservicio)
+router.post(
+  '/forgot-password',
+  authLimiter,
+  [check('email', 'Debe ser un email válido').isEmail()],
+  forgotPassword
+)
+
+// Confirmar reseteo con el token del correo
+router.post(
+  '/reset-password/:token',
+  authLimiter,
+  [check('password', 'El password debe tener al menos 6 caracteres').isLength({ min: 6 })],
+  resetPassword
+)
 
 module.exports = router

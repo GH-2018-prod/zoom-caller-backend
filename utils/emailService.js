@@ -39,4 +39,40 @@ const sendWelcomeEmail = async (to, name) => {
   }
 };
 
-module.exports = { sendWelcomeEmail };
+/**
+ * Enviar correo con link para restablecer contraseña
+ * @param {string} to - Email del destinatario
+ * @param {string} name - Nombre del usuario
+ * @param {string} resetLink - Link con el token de reseteo
+ */
+const sendPasswordResetEmail = async (to, name, resetLink) => {
+  try {
+    const { data, error } = await resend.emails.send({
+      from: 'Zoom Caller <onboarding@resend.dev>',
+      to,
+      subject: 'Restablecer tu contraseña',
+      html: `
+        <div style="font-family: Arial; text-align: center;">
+          <h2>Hola, ${name}</h2>
+          <p>Recibimos una solicitud para restablecer tu contraseña.</p>
+          <p>
+            <a href="${resetLink}" style="display:inline-block;padding:10px 20px;background:#2563EB;color:#fff;text-decoration:none;border-radius:6px;">
+              Restablecer contraseña
+            </a>
+          </p>
+          <p>Este link expira en 1 hora. Si no pediste este cambio, podés ignorar este correo.</p>
+          <br />
+          <small>© ${new Date().getFullYear()} Zoom Caller</small>
+        </div>
+      `,
+    });
+
+    if (error) throw error;
+    console.log(`✅ Correo de reseteo enviado a ${to}`, data);
+  } catch (err) {
+    console.error(`❌ Error al enviar correo de reseteo a ${to}:`, err);
+    throw err;
+  }
+};
+
+module.exports = { sendWelcomeEmail, sendPasswordResetEmail };
