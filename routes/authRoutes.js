@@ -6,12 +6,16 @@ const { auth } = require('../middleware/authMiddleware')
 
 const router = express.Router()
 
-// Limite de intentos para frenar fuerza bruta sobre credenciales
+// Limite de intentos para frenar fuerza bruta sobre credenciales. Solo
+// cuenta los intentos FALLIDOS — un login legitimo repetido (normal en
+// desarrollo, o alguien que entra varias veces por dia) nunca deberia
+// bloquearse; lo que hay que frenar es una racha de intentos que fallan.
 const authLimiter = rateLimit({
   windowMs: 15 * 60 * 1000, // 15 minutos
   max: 10,
   standardHeaders: true,
   legacyHeaders: false,
+  skipSuccessfulRequests: true,
   message: { msg: 'Demasiados intentos, probá de nuevo en unos minutos' },
 })
 

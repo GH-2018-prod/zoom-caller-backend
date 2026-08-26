@@ -1,6 +1,8 @@
 const User = require('../models/User')
+const Image = require('../models/Image')
 const bcrypt = require('bcryptjs')
 const jwt = require('jsonwebtoken')
+const cloudinary = require('cloudinary').v2
 const { validationResult } = require('express-validator')
 const { sendWelcomeEmail } = require('../utils/emailService')
 
@@ -111,7 +113,19 @@ const updateUser = async (req, res) => {
   const { id } = req.params;
 
   try {
-    const updatedUser = await User.findByIdAndUpdate(id, req.body, { new: true, runValidators: true });
+    const updates = { ...req.body };
+
+    // Contrasena opcional (reset asistido por admin) — findByIdAndUpdate
+    // no dispara el pre('save') que hashea, asi que se hashea ac a mano
+    // si vino una nueva. Si vino vacia/ausente, no se toca la existente.
+    if (updates.password) {
+      const salt = await bcrypt.genSalt(10);
+      updates.password = await bcrypt.hash(updates.password, salt);
+    } else {
+      delete updates.password;
+    }
+
+    const updatedUser = await User.findByIdAndUpdate(id, updates, { new: true, runValidators: true });
 
     if (!updatedUser) {
       return res.status(404).json({ message: 'Usuario no encontrado' });
@@ -129,6 +143,20 @@ const deleteUser = async (req, res) => {
   const { id } = req.params;
 
   try {
+    // Antes de borrar al usuario, borrar sus imagenes (comprobantes) tanto
+    // de Cloudinary como de Mongo — si no, quedan huerfanas: ocupando
+    // espacio en Cloudinary para siempre y rompiendo la Galeria al
+    // intentar mostrar un "user" que ya no existe.
+    const images = await Image.find({ user: id });
+    for (const image of images) {
+      try {
+        await cloudinary.uploader.destroy(image.public_id);
+      } catch (cloudinaryError) {
+        console.error('Error borrando imagen de Cloudinary:', cloudinaryError.message);
+      }
+    }
+    await Image.deleteMany({ user: id });
+
     const deletedUser = await User.findByIdAndDelete(id);
 
     if (!deletedUser) {

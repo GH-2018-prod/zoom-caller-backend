@@ -26,7 +26,10 @@ router.get('/images', auth, async (req, res) => {
       .populate('user', 'name email role')
       .sort({ createdAt: -1 });
 
-    res.json(images);
+    // Si el usuario dueno de la imagen fue borrado, el populate deja
+    // "user" en null en vez de tirar error — se filtran ac, no tiene
+    // sentido mostrarlas y rompian el front al agrupar por usuario.
+    res.json(images.filter((img) => img.user));
   } catch (error) {
     res.status(500).json({ message: 'Error obteniendo imágenes' });
   }
