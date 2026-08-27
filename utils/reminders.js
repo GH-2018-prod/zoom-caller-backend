@@ -36,7 +36,10 @@ const checkClassReminders = async () => {
             tag,
           })
 
-          const teacherId = student.details?.teacherId
+          // El profesor es por horario (entry.teacherId); el campo viejo
+          // student.details.teacherId solo queda como respaldo para
+          // estudiantes que todavia no se migraron al modelo nuevo.
+          const teacherId = entry.teacherId || student.details?.teacherId
           if (teacherId) {
             const slotKey = `${teacherId}-${entry.day}-${entry.time}`
             if (!notifiedTeacherSlots.has(slotKey)) {
