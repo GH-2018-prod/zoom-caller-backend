@@ -103,7 +103,27 @@ const getMyStudents = async (req, res) => {
       role: 'student',
       $or: [{ 'details.teacherId': teacherId }, { 'details.schedule.teacherId': teacherId }],
     }).select('-password');
-    res.status(200).json(students);
+
+    // Un estudiante puede compartirse entre varios profesores (una entrada
+    // de horario por profesor). Ademas de encontrar al estudiante, hay que
+    // recortar su horario a solo las entradas de ESTE profesor — si no, la
+    // respuesta le manda al profesor las clases (y el nombre) del otro
+    // profesor con el mismo estudiante, rompiendo la privacidad entre
+    // profesores aunque el frontend despues no las muestre.
+    const scoped = students.map((student) => {
+      const obj = student.toObject();
+      const schedule = obj.details?.schedule || [];
+      const legacyTeacherId = obj.details?.teacherId;
+      obj.details = {
+        ...obj.details,
+        schedule: schedule.filter((entry) =>
+          entry.teacherId ? entry.teacherId === teacherId : legacyTeacherId === teacherId
+        ),
+      };
+      return obj;
+    });
+
+    res.status(200).json(scoped);
   } catch (error) {
     res.status(500).json({ message: 'Server error' });
   }
