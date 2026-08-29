@@ -1,11 +1,13 @@
 const crypto = require('crypto')
 const User = require('../models/User')
 const Image = require('../models/Image')
+const ScheduleChange = require('../models/ScheduleChange')
 const bcrypt = require('bcryptjs')
 const jwt = require('jsonwebtoken')
 const cloudinary = require('cloudinary').v2
 const { validationResult } = require('express-validator')
 const { sendWelcomeEmail, sendPasswordResetEmail } = require('../utils/emailService')
+const { findTeacherConflict } = require('../utils/teacherConflict')
 
 // Tokens de larga duracion (antes 365d) sin refresh token detras.
 // Configurable via env para poder ajustarlo sin tocar codigo.
@@ -19,6 +21,19 @@ const registerUser = async (req, res) => {
   try {
     let user = await User.findOne({ email });
     if (user) return res.status(400).json({ msg: 'El usuario ya existe' });
+
+    // Un profesor no puede quedar con dos clases distintas al mismo
+    // dia+hora — se valida ANTES de crear al estudiante.
+    for (const entry of details?.schedule || []) {
+      if (!entry.day || !entry.time || !entry.teacherId) continue
+      const conflict = await findTeacherConflict(entry.teacherId, entry.day, entry.time)
+      if (conflict) {
+        return res.status(400).json({
+          msg: `Ese profesor ya tiene clase el ${entry.day} a las ${entry.time} (con ${conflict.name})`,
+        })
+      }
+    }
+
     user = new User({
       name,
       email,
@@ -99,26 +114,55 @@ const getUsers = async (req, res) => {
 const getMyStudents = async (req, res) => {
   try {
     const teacherId = req.user.id;
+
+    // Una clase reprogramada hacia un horario habilitado por ESTE profesor
+    // pasa a ser suya (aunque el estudiante sea originalmente de otro
+    // profesor) — hay que traer tambien a esos estudiantes, y recordar cual
+    // entrada puntual (dia+hora original) quedo reasignada.
+    const reassignments = await ScheduleChange.find({
+      action: 'rescheduled',
+      newTeacherId: teacherId,
+      originalDate: { $gte: new Date() },
+    }).select('studentId originalDay originalTime');
+
+    const reassignedStudentIds = reassignments.map((r) => r.studentId.toString());
+    const reassignedKeysByStudent = {};
+    reassignments.forEach((r) => {
+      const sid = r.studentId.toString();
+      if (!reassignedKeysByStudent[sid]) reassignedKeysByStudent[sid] = new Set();
+      reassignedKeysByStudent[sid].add(`${r.originalDay}__${r.originalTime}`);
+    });
+
     const students = await User.find({
       role: 'student',
-      $or: [{ 'details.teacherId': teacherId }, { 'details.schedule.teacherId': teacherId }],
+      $or: [
+        { 'details.teacherId': teacherId },
+        { 'details.schedule.teacherId': teacherId },
+        { _id: { $in: reassignedStudentIds } },
+      ],
     }).select('-password');
 
     // Un estudiante puede compartirse entre varios profesores (una entrada
     // de horario por profesor). Ademas de encontrar al estudiante, hay que
-    // recortar su horario a solo las entradas de ESTE profesor — si no, la
-    // respuesta le manda al profesor las clases (y el nombre) del otro
-    // profesor con el mismo estudiante, rompiendo la privacidad entre
-    // profesores aunque el frontend despues no las muestre.
+    // recortar su horario a solo las entradas de ESTE profesor (directas o
+    // reasignadas por reprogramacion) — si no, la respuesta le manda al
+    // profesor las clases (y el nombre) del otro profesor con el mismo
+    // estudiante, rompiendo la privacidad entre profesores aunque el
+    // frontend despues no las muestre.
     const scoped = students.map((student) => {
       const obj = student.toObject();
       const schedule = obj.details?.schedule || [];
       const legacyTeacherId = obj.details?.teacherId;
+      const reassignedKeys = reassignedKeysByStudent[obj._id.toString()] || new Set();
       obj.details = {
         ...obj.details,
-        schedule: schedule.filter((entry) =>
-          entry.teacherId ? entry.teacherId === teacherId : legacyTeacherId === teacherId
-        ),
+        schedule: schedule.filter((entry) => {
+          const ownsDirectly = entry.teacherId
+            ? entry.teacherId === teacherId
+            : legacyTeacherId === teacherId;
+          const reassignedToMe = reassignedKeys.has(`${entry.day}__${entry.time}`);
+          return ownsDirectly || reassignedToMe;
+        }),
       };
       return obj;
     });
@@ -144,6 +188,19 @@ const updateUser = async (req, res) => {
       updates.password = await bcrypt.hash(updates.password, salt);
     } else {
       delete updates.password;
+    }
+
+    // Un profesor no puede quedar con dos clases distintas al mismo
+    // dia+hora — se excluye al propio estudiante para no chocar contra sus
+    // propias entradas sin cambios.
+    for (const entry of updates.details?.schedule || []) {
+      if (!entry.day || !entry.time || !entry.teacherId) continue
+      const conflict = await findTeacherConflict(entry.teacherId, entry.day, entry.time, id)
+      if (conflict) {
+        return res.status(400).json({
+          message: `Ese profesor ya tiene clase el ${entry.day} a las ${entry.time} (con ${conflict.name})`,
+        });
+      }
     }
 
     const updatedUser = await User.findByIdAndUpdate(id, updates, { new: true, runValidators: true });

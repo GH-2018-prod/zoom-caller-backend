@@ -3,10 +3,12 @@ const router = express.Router()
 
 const ScheduleChange = require('../models/ScheduleChange')
 const RescheduleSlot = require('../models/RescheduleSlot')
+const User = require('../models/User')
 const { protect } = require('../middleware/usersMiddleware')
-const { adminOnly, teacherOrAdminOnly } = require('../middleware/roleMiddleware')
+const { teacherOrAdminOnly } = require('../middleware/roleMiddleware')
 const { getNextMeetingDate } = require('../utils/scheduleTime')
 const { sendPushToUser } = require('../utils/pushService')
+const { findTeacherConflict } = require('../utils/teacherConflict')
 
 const CANCELLATION_WINDOW_MS = 60 * 60 * 1000
 
@@ -83,8 +85,8 @@ router.post('/schedule-changes/cancel', protect, async (req, res) => {
 
 router.post('/schedule-changes/reschedule', protect, async (req, res) => {
   try {
-    const { day, time, newDay, newTime } = req.body
-    if (!day || !time || !newDay || !newTime) {
+    const { day, time, newDay, newTime, newTeacherId } = req.body
+    if (!day || !time || !newDay || !newTime || !newTeacherId) {
       return res.status(400).json({ message: 'Faltan datos del horario' })
     }
 
@@ -95,27 +97,39 @@ router.post('/schedule-changes/reschedule', protect, async (req, res) => {
       return res.status(404).json({ message: 'Ese horario no es parte de tu clase' })
     }
 
-    // Un horario es valido para reprogramar si esta en la lista fija del
-    // admin, O si quedo libre en su horario ORIGINAL porque otro (o el
-    // mismo) estudiante cancelo o reprogramo justo esa clase esta semana.
-    const isFixed = await RescheduleSlot.exists({ day: newDay, time: newTime })
+    const newTeacher = await User.findOne({ _id: newTeacherId, role: 'teacher' }).select('name')
+    if (!newTeacher) {
+      return res.status(404).json({ message: 'Profesor no encontrado' })
+    }
+
+    // Un horario es valido para reprogramar si ESE profesor lo dejo en su
+    // lista fija, O si le quedo libre en su horario ORIGINAL porque un
+    // estudiante suyo (o el mismo) cancelo/reprogramo justo esa clase esta
+    // semana. La clase pasa a ser de ese profesor — no del original.
+    const isFixed = await RescheduleSlot.exists({
+      teacherId: newTeacherId,
+      day: newDay,
+      time: newTime,
+    })
     const isFreed = await ScheduleChange.exists({
       action: { $in: ['cancelled', 'rescheduled'] },
       originalDay: newDay,
       originalTime: newTime,
       originalDate: { $gte: new Date() },
+      teacherId: newTeacherId,
     })
     if (!isFixed && !isFreed) {
       return res.status(400).json({ message: 'Ese horario no esta disponible' })
     }
 
-    // El slot puede estar ocupado por otra reprogramacion vigente — salvo
-    // que sea la propia (re-elegir el mismo horario para la misma clase no
-    // cuenta como "ocupado por otro").
+    // El slot de ESE profesor puede estar ocupado por otra reprogramacion
+    // vigente — salvo que sea la propia (re-elegir el mismo horario para la
+    // misma clase no cuenta como "ocupado por otro").
     const occupant = await ScheduleChange.findOne({
       action: 'rescheduled',
       newDay,
       newTime,
+      newTeacherId,
       originalDate: { $gte: new Date() },
     })
     const isOwnOccupant =
@@ -135,13 +149,14 @@ router.post('/schedule-changes/reschedule', protect, async (req, res) => {
     }
 
     const newMeetingDate = getNextMeetingDate(newDay, newTime)
+    const originalTeacherId = scheduleEntry.teacherId || req.user.details?.teacherId || null
 
     const change = await ScheduleChange.findOneAndUpdate(
       { studentId: req.user._id, originalDay: day, originalTime: time },
       {
         studentId: req.user._id,
         studentName: req.user.name,
-        teacherId: scheduleEntry.teacherId || req.user.details?.teacherId || null,
+        teacherId: originalTeacherId,
         action: 'rescheduled',
         originalDay: day,
         originalTime: time,
@@ -149,18 +164,27 @@ router.post('/schedule-changes/reschedule', protect, async (req, res) => {
         newDay,
         newTime,
         newDate: newMeetingDate,
+        newTeacherId,
+        newTeacherName: newTeacher.name,
         teacherConfirmed: false,
       },
       { new: true, upsert: true, runValidators: true }
     )
 
-    if (change.teacherId) {
-      await sendPushToUser(change.teacherId, {
+    // Al profesor original se le avisa que perdio esa sesion puntual (si es
+    // otro distinto del nuevo dueno del horario).
+    if (originalTeacherId && originalTeacherId.toString() !== newTeacherId.toString()) {
+      await sendPushToUser(originalTeacherId, {
         title: 'Clase reprogramada',
-        body: `${req.user.name} movio su clase del ${day} ${time} a ${newDay} ${newTime}.`,
-        tag: `schedule-reschedule-${change._id}`,
+        body: `${req.user.name} movio su clase del ${day} ${time} a otro horario.`,
+        tag: `schedule-reschedule-out-${change._id}`,
       })
     }
+    await sendPushToUser(newTeacherId, {
+      title: 'Nueva clase reprogramada',
+      body: `${req.user.name} se unio a tu horario del ${newDay} a las ${newTime}.`,
+      tag: `schedule-reschedule-in-${change._id}`,
+    })
 
     res.json(change)
   } catch (error) {
@@ -182,7 +206,9 @@ router.get(
     try {
       const filter = { originalDate: { $gte: new Date() } }
       if (req.user.role === 'teacher') {
-        filter.teacherId = req.user._id
+        // Incluye tanto lo suyo de siempre como lo que le llego reasignado
+        // por reprogramacion de otro profesor.
+        filter.$or = [{ teacherId: req.user._id }, { newTeacherId: req.user._id }]
       }
       const changes = await ScheduleChange.find(filter)
       res.json(changes)
@@ -236,60 +262,108 @@ router.put(
   }
 )
 
-// Horarios disponibles para reprogramar — cualquier usuario autenticado
-// los puede ver (los necesita el selector de reprogramar), solo el admin
-// los administra.
+// Horarios disponibles para reprogramar — cada uno pertenece a un profesor.
+// Un profesor solo ve los suyos (no puede ver los de otros profesores); el
+// admin y los estudiantes ven todos (el estudiante los necesita para el
+// selector de reprogramar, y tiene que poder elegir cualquier profesor).
 router.get('/schedule-changes/fixed-slots', protect, async (req, res) => {
   try {
-    const slots = await RescheduleSlot.find().sort({ day: 1, time: 1 })
+    const filter = req.user.role === 'teacher' ? { teacherId: req.user._id } : {}
+    const slots = await RescheduleSlot.find(filter).sort({ day: 1, time: 1 })
     res.json(slots)
   } catch (error) {
     res.status(500).json({ message: 'Error obteniendo horarios disponibles' })
   }
 })
 
-// Horarios de la lista de fixed-slots que YA estan ocupados por una
-// reprogramacion vigente de otro estudiante — el frontend los saca del
-// selector para no permitir un choque. Se calcula en vivo, asi que un
-// horario reaparece solo al cancelarse la reprogramacion que lo ocupaba
-// (o al pasar su fecha, como cualquier ScheduleChange).
+// Horarios que YA estan ocupados por una reprogramacion vigente de otro
+// estudiante — el frontend los saca del selector para no permitir un
+// choque. El profesor dueno del horario importa: dos profesores distintos
+// pueden compartir el mismo dia+hora sin chocar entre si.
 router.get('/schedule-changes/occupied-slots', protect, async (req, res) => {
   try {
     const changes = await ScheduleChange.find({
       action: 'rescheduled',
       originalDate: { $gte: new Date() },
-    }).select('newDay newTime')
-    res.json(changes.map((c) => ({ day: c.newDay, time: c.newTime })))
+    }).select('newDay newTime newTeacherId')
+    res.json(
+      changes.map((c) => ({
+        day: c.newDay,
+        time: c.newTime,
+        teacherId: c.newTeacherId?.toString() || null,
+      }))
+    )
   } catch (error) {
     res.status(500).json({ message: 'Error obteniendo horarios ocupados' })
   }
 })
 
-// Horarios que quedaron libres esta semana en su horario ORIGINAL —
-// porque alguien cancelo esa clase, o porque la reprogramo a otro
-// horario (el original tambien queda vacio, no solo el nuevo). Se suman
-// al pool de horarios disponibles para reprogramar (fixed-slots), sin
-// importar si el que reprograma es el mismo estudiante o cualquier otro.
+// Horarios que quedaron libres esta semana en su horario ORIGINAL — porque
+// alguien cancelo esa clase, o porque la reprogramo a otro horario (el
+// original tambien queda vacio, no solo el nuevo). Cada uno queda libre
+// para el profesor que la dictaba, no para cualquiera — se suman al pool
+// de ESE profesor (fixed-slots). Un profesor solo ve los suyos; admin y
+// estudiantes ven todos.
 router.get('/schedule-changes/freed-slots', protect, async (req, res) => {
   try {
-    const changes = await ScheduleChange.find({
+    const filter = {
       action: { $in: ['cancelled', 'rescheduled'] },
       originalDate: { $gte: new Date() },
-    }).select('originalDay originalTime')
-    res.json(changes.map((c) => ({ day: c.originalDay, time: c.originalTime })))
+    }
+    if (req.user.role === 'teacher') {
+      filter.teacherId = req.user._id
+    }
+    const changes = await ScheduleChange.find(filter)
+      .select('originalDay originalTime teacherId')
+      .populate('teacherId', 'name')
+    res.json(
+      changes
+        .filter((c) => c.teacherId)
+        .map((c) => ({
+          day: c.originalDay,
+          time: c.originalTime,
+          teacherId: c.teacherId._id.toString(),
+          teacherName: c.teacherId.name,
+        }))
+    )
   } catch (error) {
     res.status(500).json({ message: 'Error obteniendo horarios liberados' })
   }
 })
 
-router.post('/schedule-changes/fixed-slots', protect, adminOnly, async (req, res) => {
+// Un profesor habilita sus propios horarios; el admin puede habilitar uno
+// a nombre de cualquier profesor. Ninguno de los dos puede dejar un
+// horario donde ese profesor ya tiene una clase (no puede estar "libre" y
+// "ocupado" al mismo tiempo).
+router.post('/schedule-changes/fixed-slots', protect, teacherOrAdminOnly, async (req, res) => {
   try {
     const { day, time } = req.body
     if (!day || !time) {
       return res.status(400).json({ message: 'Dia y hora son obligatorios' })
     }
 
-    const slot = await RescheduleSlot.create({ day, time })
+    let teacherId = req.user.role === 'teacher' ? req.user._id.toString() : req.body.teacherId
+    let teacherName = req.user.role === 'teacher' ? req.user.name : null
+
+    if (!teacherId) {
+      return res.status(400).json({ message: 'Selecciona un profesor' })
+    }
+    if (!teacherName) {
+      const teacherUser = await User.findOne({ _id: teacherId, role: 'teacher' }).select('name')
+      if (!teacherUser) {
+        return res.status(404).json({ message: 'Profesor no encontrado' })
+      }
+      teacherName = teacherUser.name
+    }
+
+    const conflict = await findTeacherConflict(teacherId, day, time)
+    if (conflict) {
+      return res.status(400).json({
+        message: `${teacherName} ya tiene clase el ${day} a las ${time} (con ${conflict.name})`,
+      })
+    }
+
+    const slot = await RescheduleSlot.create({ teacherId, teacherName, day, time })
     res.status(201).json(slot)
   } catch (error) {
     if (error.code === 11000) {
@@ -299,16 +373,25 @@ router.post('/schedule-changes/fixed-slots', protect, adminOnly, async (req, res
   }
 })
 
-router.delete('/schedule-changes/fixed-slots/:id', protect, adminOnly, async (req, res) => {
-  try {
-    const deleted = await RescheduleSlot.findByIdAndDelete(req.params.id)
-    if (!deleted) {
-      return res.status(404).json({ message: 'Horario no encontrado' })
+router.delete(
+  '/schedule-changes/fixed-slots/:id',
+  protect,
+  teacherOrAdminOnly,
+  async (req, res) => {
+    try {
+      const slot = await RescheduleSlot.findById(req.params.id)
+      if (!slot) {
+        return res.status(404).json({ message: 'Horario no encontrado' })
+      }
+      if (req.user.role === 'teacher' && slot.teacherId.toString() !== req.user._id.toString()) {
+        return res.status(403).json({ message: 'No podes borrar el horario de otro profesor' })
+      }
+      await slot.deleteOne()
+      res.json({ message: 'Horario eliminado' })
+    } catch (error) {
+      res.status(500).json({ message: 'Error eliminando el horario' })
     }
-    res.json({ message: 'Horario eliminado' })
-  } catch (error) {
-    res.status(500).json({ message: 'Error eliminando el horario' })
   }
-})
+)
 
 module.exports = router

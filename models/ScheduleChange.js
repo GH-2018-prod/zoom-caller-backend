@@ -24,6 +24,12 @@ const scheduleChangeSchema = new mongoose.Schema(
     newDay: { type: String },
     newTime: { type: String },
     newDate: { type: Date },
+    // Solo aplica a reprogramaciones hacia un horario habilitado por OTRO
+    // profesor (o el mismo) — desde ese momento, esa sesion puntual la da
+    // el dueno del horario nuevo, no el profesor original (teacherId de
+    // arriba sigue siendo el original, para poder avisarle que la perdio).
+    newTeacherId: { type: mongoose.Schema.Types.ObjectId, ref: 'User' },
+    newTeacherName: { type: String, trim: true },
     // Solo aplica a cancelaciones — el profesor no aprueba ni bloquea la
     // cancelacion (ya es efectiva), esto es un acuse de recibo.
     teacherConfirmed: { type: Boolean, default: false },
