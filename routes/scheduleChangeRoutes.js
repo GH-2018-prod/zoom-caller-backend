@@ -192,12 +192,14 @@ router.post('/schedule-changes/reschedule', protect, async (req, res) => {
   }
 })
 
-// Un estudiante sin horario asignado (el admin lo creo con una entrada en
-// blanco) elige su propio horario permanente — SOLO de la lista fija de
+// Un estudiante elige un horario permanente — SOLO de la lista fija de
 // disponibilidad de un profesor, nunca de "liberados", porque esos son
 // libres solo por esta semana y la que viene volverian a chocar con la
-// clase real de otro estudiante. Al confirmarse, deja de ser "disponible"
-// (se borra el RescheduleSlot) porque ya es una clase real, no un cupo.
+// clase real de otro estudiante. Si tiene una entrada en blanco (el admin
+// lo creo sin asignarle dia/hora), la completa; si no tiene ninguna en
+// blanco, agrega una clase mas (para el que quiere sumar otro horario).
+// Al confirmarse, deja de ser "disponible" (se borra el RescheduleSlot)
+// porque ya es una clase real, no un cupo.
 router.post('/schedule-changes/choose-initial-slot', protect, async (req, res) => {
   try {
     if (req.user.role !== 'student') {
@@ -211,9 +213,6 @@ router.post('/schedule-changes/choose-initial-slot', protect, async (req, res) =
 
     const schedule = req.user.details?.schedule || []
     const blankIndex = schedule.findIndex((entry) => !entry.day || !entry.time)
-    if (blankIndex === -1) {
-      return res.status(400).json({ message: 'No tenés horarios pendientes de asignar' })
-    }
 
     const slot = await RescheduleSlot.findOne({ teacherId, day, time })
     if (!slot) {
@@ -229,12 +228,11 @@ router.post('/schedule-changes/choose-initial-slot', protect, async (req, res) =
     }
 
     const updatedSchedule = [...schedule]
-    updatedSchedule[blankIndex] = {
-      ...updatedSchedule[blankIndex],
-      day,
-      time,
-      teacherId,
-      teacher: slot.teacherName,
+    const newEntry = { day, time, teacherId, teacher: slot.teacherName }
+    if (blankIndex === -1) {
+      updatedSchedule.push(newEntry)
+    } else {
+      updatedSchedule[blankIndex] = { ...updatedSchedule[blankIndex], ...newEntry }
     }
 
     const updatedUser = await User.findByIdAndUpdate(
