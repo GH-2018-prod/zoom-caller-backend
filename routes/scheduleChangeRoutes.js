@@ -192,6 +192,66 @@ router.post('/schedule-changes/reschedule', protect, async (req, res) => {
   }
 })
 
+// Un estudiante sin horario asignado (el admin lo creo con una entrada en
+// blanco) elige su propio horario permanente — SOLO de la lista fija de
+// disponibilidad de un profesor, nunca de "liberados", porque esos son
+// libres solo por esta semana y la que viene volverian a chocar con la
+// clase real de otro estudiante. Al confirmarse, deja de ser "disponible"
+// (se borra el RescheduleSlot) porque ya es una clase real, no un cupo.
+router.post('/schedule-changes/choose-initial-slot', protect, async (req, res) => {
+  try {
+    if (req.user.role !== 'student') {
+      return res.status(403).json({ message: 'Solo un estudiante puede elegir su horario' })
+    }
+
+    const { day, time, teacherId } = req.body
+    if (!day || !time || !teacherId) {
+      return res.status(400).json({ message: 'Faltan datos del horario' })
+    }
+
+    const schedule = req.user.details?.schedule || []
+    const blankIndex = schedule.findIndex((entry) => !entry.day || !entry.time)
+    if (blankIndex === -1) {
+      return res.status(400).json({ message: 'No tenés horarios pendientes de asignar' })
+    }
+
+    const slot = await RescheduleSlot.findOne({ teacherId, day, time })
+    if (!slot) {
+      return res.status(400).json({ message: 'Ese horario ya no está disponible' })
+    }
+
+    // Chequeo extra por si alguien mas tomo ese mismo horario justo antes.
+    const conflict = await findTeacherConflict(teacherId, day, time)
+    if (conflict) {
+      return res
+        .status(400)
+        .json({ message: `Ese horario ya no está disponible (ocupado por ${conflict.name})` })
+    }
+
+    const updatedSchedule = [...schedule]
+    updatedSchedule[blankIndex] = {
+      ...updatedSchedule[blankIndex],
+      day,
+      time,
+      teacherId,
+      teacher: slot.teacherName,
+    }
+
+    const updatedUser = await User.findByIdAndUpdate(
+      req.user._id,
+      { 'details.schedule': updatedSchedule },
+      { new: true, runValidators: true }
+    ).select('-password')
+
+    // Ya no es disponibilidad libre — es una clase real ocupando ese lugar.
+    await RescheduleSlot.deleteOne({ _id: slot._id })
+
+    res.json(updatedUser)
+  } catch (error) {
+    res.status(500).json({ message: 'Error asignando el horario' })
+  }
+})
+
 // Todos los cambios vigentes (cancelados Y reprogramados, confirmados o
 // no) de los estudiantes relevantes — admin ve todos, profesor solo los
 // suyos. A diferencia de pending-confirmations, esto alimenta la vista
