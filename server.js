@@ -3,8 +3,10 @@ const express = require('express')
 const dotenv = require('dotenv')
 const cors = require('cors')
 const morgan = require('morgan')
+const cron = require('node-cron')
 const connectDB = require('./config/db')
 const { startReminderJobs } = require('./utils/reminders')
+const { syncPayrollExpenses } = require('./utils/teacherPayroll')
 
 //Config
 dotenv.config()
@@ -57,7 +59,15 @@ app.use('/api', require('./routes/pushRoutes'))
 //Schedule changes Route (cancelar/reprogramar clases)
 app.use('/api', require('./routes/scheduleChangeRoutes'))
 
+//Payroll Route (pago semanal a profesores)
+app.use('/api', require('./routes/payrollRoutes'))
+
 startReminderJobs()
+
+// Sincroniza el gasto de nomina de cada profesor cada 30 min, y una vez al
+// arrancar para que no haya que esperar hasta el primer tick.
+cron.schedule('*/30 * * * *', syncPayrollExpenses)
+syncPayrollExpenses().catch((err) => console.error('Error sincronizando nomina:', err.message))
 
 //public directory
 app.use(express.static(path.join(__dirname, 'public')))
