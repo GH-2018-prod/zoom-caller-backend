@@ -9,6 +9,7 @@ const { teacherOrAdminOnly } = require('../middleware/roleMiddleware')
 const { getNextMeetingDate } = require('../utils/scheduleTime')
 const { sendPushToUser } = require('../utils/pushService')
 const { findTeacherConflict } = require('../utils/teacherConflict')
+const { dayLabels } = require('../utils/dayLabels')
 
 const CANCELLATION_WINDOW_MS = 60 * 60 * 1000
 
@@ -72,7 +73,7 @@ router.post('/schedule-changes/cancel', protect, async (req, res) => {
     if (change.teacherId) {
       await sendPushToUser(change.teacherId, {
         title: 'Clase cancelada',
-        body: `${req.user.name} cancelo su clase del ${day} a las ${time}.`,
+        body: `${req.user.name} cancelo su clase del ${dayLabels[day]} a las ${time}.`,
         tag: `schedule-cancel-${change._id}`,
       })
     }
@@ -176,13 +177,13 @@ router.post('/schedule-changes/reschedule', protect, async (req, res) => {
     if (originalTeacherId && originalTeacherId.toString() !== newTeacherId.toString()) {
       await sendPushToUser(originalTeacherId, {
         title: 'Clase reprogramada',
-        body: `${req.user.name} movio su clase del ${day} ${time} a otro horario.`,
+        body: `${req.user.name} movio su clase del ${dayLabels[day]} ${time} a otro horario.`,
         tag: `schedule-reschedule-out-${change._id}`,
       })
     }
     await sendPushToUser(newTeacherId, {
       title: 'Nueva clase reprogramada',
-      body: `${req.user.name} se unio a tu horario del ${newDay} a las ${newTime}.`,
+      body: `${req.user.name} se unio a tu horario del ${dayLabels[newDay]} a las ${newTime}.`,
       tag: `schedule-reschedule-in-${change._id}`,
     })
 
@@ -417,7 +418,7 @@ router.post('/schedule-changes/fixed-slots', protect, teacherOrAdminOnly, async 
     const conflict = await findTeacherConflict(teacherId, day, time)
     if (conflict) {
       return res.status(400).json({
-        message: `${teacherName} ya tiene clase el ${day} a las ${time} (con ${conflict.name})`,
+        message: `${teacherName} ya tiene clase el ${dayLabels[day]} a las ${time} (con ${conflict.name})`,
       })
     }
 

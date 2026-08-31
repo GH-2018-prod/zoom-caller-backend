@@ -8,6 +8,7 @@ const cloudinary = require('cloudinary').v2
 const { validationResult } = require('express-validator')
 const { sendWelcomeEmail, sendPasswordResetEmail } = require('../utils/emailService')
 const { findTeacherConflict } = require('../utils/teacherConflict')
+const { dayLabels } = require('../utils/dayLabels')
 
 // Tokens de larga duracion (antes 365d) sin refresh token detras.
 // Configurable via env para poder ajustarlo sin tocar codigo.
@@ -29,7 +30,7 @@ const registerUser = async (req, res) => {
       const conflict = await findTeacherConflict(entry.teacherId, entry.day, entry.time)
       if (conflict) {
         return res.status(400).json({
-          msg: `Ese profesor ya tiene clase el ${entry.day} a las ${entry.time} (con ${conflict.name})`,
+          msg: `Ese profesor ya tiene clase el ${dayLabels[entry.day]} a las ${entry.time} (con ${conflict.name})`,
         })
       }
     }
@@ -198,7 +199,7 @@ const updateUser = async (req, res) => {
       const conflict = await findTeacherConflict(entry.teacherId, entry.day, entry.time, id)
       if (conflict) {
         return res.status(400).json({
-          message: `Ese profesor ya tiene clase el ${entry.day} a las ${entry.time} (con ${conflict.name})`,
+          message: `Ese profesor ya tiene clase el ${dayLabels[entry.day]} a las ${entry.time} (con ${conflict.name})`,
         });
       }
     }
