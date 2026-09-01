@@ -62,6 +62,9 @@ app.use('/api', require('./routes/scheduleChangeRoutes'))
 //Payroll Route (pago semanal a profesores)
 app.use('/api', require('./routes/payrollRoutes'))
 
+//Attendance Route (el profesor marca clases dictadas/no dictadas)
+app.use('/api', require('./routes/attendanceRoutes'))
+
 startReminderJobs()
 
 // Sincroniza el gasto de nomina de cada profesor cada 30 min, y una vez al
