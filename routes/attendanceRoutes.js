@@ -3,6 +3,7 @@ const router = express.Router()
 
 const ClassAttendance = require('../models/ClassAttendance')
 const { protect } = require('../middleware/usersMiddleware')
+const { adminOnly } = require('../middleware/roleMiddleware')
 const { computeWeeklyOccurrences } = require('../utils/weeklyOccurrences')
 
 // Clases de esta semana que ya pasaron y todavia no fueron marcadas por el
@@ -103,6 +104,23 @@ router.get('/attendance/my-progress', protect, async (req, res) => {
     res.json({ attended, absent, total, attendanceRate })
   } catch (error) {
     res.status(500).json({ message: 'Error obteniendo tu progreso' })
+  }
+})
+
+// Asistencia promedio de TODA la academia (todos los estudiantes, todo el
+// historial) — alimenta la tarjeta "Asistencia promedio" del dashboard de
+// admin, que antes era un dato de ejemplo fijo.
+router.get('/attendance/summary', protect, adminOnly, async (req, res) => {
+  try {
+    const records = await ClassAttendance.find().select('status')
+    const attended = records.filter((r) => r.status === 'attended').length
+    const absent = records.filter((r) => r.status === 'absent').length
+    const total = attended + absent
+    const attendanceRate = total > 0 ? Math.round((attended / total) * 100) : 0
+
+    res.json({ attended, absent, total, attendanceRate })
+  } catch (error) {
+    res.status(500).json({ message: 'Error obteniendo el resumen de asistencia' })
   }
 })
 

@@ -5,15 +5,29 @@ const User = require('../models/User')
 const { protect } = require('../middleware/usersMiddleware')
 const { adminOnly, teacherOrAdminOnly } = require('../middleware/roleMiddleware')
 const { RATE_PER_CLASS, computeWeeklyClassCounts } = require('../utils/teacherPayroll')
+const { computeWeeklyOccurrences } = require('../utils/weeklyOccurrences')
 
-// Clases dictadas y monto ganado esta semana, del profesor autenticado. Se
-// calcula en vivo (no se lee del Expense guardado) para que no dependa de
-// cuando corrio el cron por ultima vez.
+// Clases dictadas (confirmadas por el profesor) y monto ganado esta
+// semana, mas el total de clases programadas para la semana completa —
+// este ultimo incluye las que le llegaron por reprogramacion de otro
+// profesor, y resta las canceladas, pero no requiere que ya hayan
+// ocurrido (a diferencia de "dictadas", que solo cuenta lo confirmado).
 router.get('/payroll/my-week', protect, teacherOrAdminOnly, async (req, res) => {
   try {
+    const teacherId = req.user._id.toString()
+
     const { countByTeacher } = await computeWeeklyClassCounts()
-    const classCount = countByTeacher[req.user._id.toString()] || 0
-    res.json({ classCount, amount: classCount * RATE_PER_CLASS, ratePerClass: RATE_PER_CLASS })
+    const classCount = countByTeacher[teacherId] || 0
+
+    const { occurrences } = await computeWeeklyOccurrences()
+    const totalScheduled = occurrences.filter((o) => o.teacherId === teacherId).length
+
+    res.json({
+      classCount,
+      totalScheduled,
+      amount: classCount * RATE_PER_CLASS,
+      ratePerClass: RATE_PER_CLASS,
+    })
   } catch (error) {
     res.status(500).json({ message: 'Error calculando el pago de la semana' })
   }
