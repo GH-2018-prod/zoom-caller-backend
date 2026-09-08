@@ -236,6 +236,16 @@ const deleteUser = async (req, res) => {
     }
     await Image.deleteMany({ user: id });
 
+    // Lo mismo con la foto de perfil, si tenia una.
+    const userToDelete = await User.findById(id).select('avatarPublicId');
+    if (userToDelete?.avatarPublicId) {
+      try {
+        await cloudinary.uploader.destroy(userToDelete.avatarPublicId);
+      } catch (cloudinaryError) {
+        console.error('Error borrando avatar de Cloudinary:', cloudinaryError.message);
+      }
+    }
+
     const deletedUser = await User.findByIdAndDelete(id);
 
     if (!deletedUser) {
@@ -246,6 +256,41 @@ const deleteUser = async (req, res) => {
   } catch (error) {
     console.error('Error al eliminar el usuario:', error);
     res.status(500).json({ message: 'Error al eliminar el usuario' });
+  }
+};
+
+// Foto de perfil del usuario autenticado — el archivo ya llego subido a
+// Cloudinary por multer (ver routes/usersRoute.js) antes de esta funcion,
+// aca solo queda guardar la URL y borrar la foto vieja si tenia una.
+const uploadAvatar = async (req, res) => {
+  try {
+    if (!req.file) {
+      return res.status(400).json({ message: 'No se envió ninguna imagen' });
+    }
+
+    const user = await User.findById(req.user.id);
+    if (!user) {
+      return res.status(404).json({ message: 'Usuario no encontrado' });
+    }
+
+    const oldPublicId = user.avatarPublicId;
+    user.avatarUrl = req.file.path;
+    user.avatarPublicId = req.file.filename;
+    await user.save();
+
+    if (oldPublicId) {
+      try {
+        await cloudinary.uploader.destroy(oldPublicId);
+      } catch (cloudinaryError) {
+        console.error('Error borrando avatar viejo de Cloudinary:', cloudinaryError.message);
+      }
+    }
+
+    const { password, ...safeUser } = user.toObject();
+    res.status(200).json(safeUser);
+  } catch (error) {
+    console.error('Error subiendo la foto de perfil:', error);
+    res.status(500).json({ message: 'Error guardando la foto de perfil' });
   }
 };
 
@@ -376,4 +421,4 @@ const resetPassword = async (req, res) => {
   }
 }
 
-module.exports = { registerUser, loginUser, getUser, getUsers, getMyStudents, updateUser, findUser, deleteUser, changePassword, forgotPassword, resetPassword };
+module.exports = { registerUser, loginUser, getUser, getUsers, getMyStudents, updateUser, findUser, deleteUser, changePassword, forgotPassword, resetPassword, uploadAvatar };

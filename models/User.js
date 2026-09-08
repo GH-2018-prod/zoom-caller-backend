@@ -11,6 +11,11 @@ const userSchema = new mongoose.Schema(
     details: {type: Object},
     resetPasswordToken: { type: String },
     resetPasswordExpires: { type: Date },
+    // Foto de perfil (avatar del navbar) — separada de Image/la galeria,
+    // que es solo para comprobantes de pago. avatarPublicId se guarda para
+    // poder borrar la foto vieja de Cloudinary al subir una nueva.
+    avatarUrl: { type: String },
+    avatarPublicId: { type: String },
   },
   { timestamps: true }
 );
