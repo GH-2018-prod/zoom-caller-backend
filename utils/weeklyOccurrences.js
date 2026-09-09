@@ -118,9 +118,33 @@ const computeWeeklyOccurrences = async (referenceDate = new Date()) => {
   return { weekStart, occurrences }
 }
 
+// Cuantas clases se cancelaron esta semana (por profesor y en total) —
+// a diferencia de computeWeeklyOccurrences, esto SI cuenta canceladas
+// aunque ya haya pasado su fecha, porque el punto es contar lo que paso
+// en la semana, no lo que todavia esta pendiente.
+const computeWeeklyCancelledCounts = async (referenceDate = new Date()) => {
+  const weekStart = getWeekStart(referenceDate)
+  const weekEnd = new Date(weekStart.getTime() + 7 * 24 * 60 * 60 * 1000)
+
+  const changes = await ScheduleChange.find({
+    action: 'cancelled',
+    originalDate: { $gte: weekStart, $lt: weekEnd },
+  }).select('teacherId')
+
+  const countByTeacher = {}
+  changes.forEach((c) => {
+    if (!c.teacherId) return
+    const key = c.teacherId.toString()
+    countByTeacher[key] = (countByTeacher[key] || 0) + 1
+  })
+
+  return { weekStart, countByTeacher, total: changes.length }
+}
+
 module.exports = {
   getWeekStart,
   getOccurrenceInWeek,
   formatWeekLabel,
   computeWeeklyOccurrences,
+  computeWeeklyCancelledCounts,
 }

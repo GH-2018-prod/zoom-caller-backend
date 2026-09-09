@@ -5,7 +5,10 @@ const User = require('../models/User')
 const { protect } = require('../middleware/usersMiddleware')
 const { adminOnly, teacherOrAdminOnly } = require('../middleware/roleMiddleware')
 const { RATE_PER_CLASS, computeWeeklyClassCounts } = require('../utils/teacherPayroll')
-const { computeWeeklyOccurrences } = require('../utils/weeklyOccurrences')
+const {
+  computeWeeklyOccurrences,
+  computeWeeklyCancelledCounts,
+} = require('../utils/weeklyOccurrences')
 
 // Clases dictadas (confirmadas por el profesor) y monto ganado esta
 // semana, mas el total de clases programadas para la semana completa —
@@ -22,9 +25,13 @@ router.get('/payroll/my-week', protect, teacherOrAdminOnly, async (req, res) => 
     const { occurrences } = await computeWeeklyOccurrences()
     const totalScheduled = occurrences.filter((o) => o.teacherId === teacherId).length
 
+    const { countByTeacher: cancelledByTeacher } = await computeWeeklyCancelledCounts()
+    const cancelledCount = cancelledByTeacher[teacherId] || 0
+
     res.json({
       classCount,
       totalScheduled,
+      cancelledCount,
       amount: classCount * RATE_PER_CLASS,
       ratePerClass: RATE_PER_CLASS,
     })
@@ -41,14 +48,18 @@ router.get('/payroll/week', protect, adminOnly, async (req, res) => {
     const teachers = await User.find({ _id: { $in: teacherIds } }).select('name')
     const nameById = Object.fromEntries(teachers.map((t) => [t._id.toString(), t.name]))
 
+    const { countByTeacher: cancelledByTeacher, total: cancelledTotal } =
+      await computeWeeklyCancelledCounts()
+
     const rows = teacherIds.map((teacherId) => ({
       teacherId,
       teacherName: nameById[teacherId] || 'Profesor',
       classCount: countByTeacher[teacherId],
+      cancelledCount: cancelledByTeacher[teacherId] || 0,
       amount: countByTeacher[teacherId] * RATE_PER_CLASS,
     }))
 
-    res.json({ ratePerClass: RATE_PER_CLASS, rows })
+    res.json({ ratePerClass: RATE_PER_CLASS, rows, cancelledTotal })
   } catch (error) {
     res.status(500).json({ message: 'Error calculando el pago de la semana' })
   }
