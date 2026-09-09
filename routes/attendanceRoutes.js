@@ -5,6 +5,7 @@ const ClassAttendance = require('../models/ClassAttendance')
 const { protect } = require('../middleware/usersMiddleware')
 const { adminOnly } = require('../middleware/roleMiddleware')
 const { computeWeeklyOccurrences } = require('../utils/weeklyOccurrences')
+const { syncPayrollExpenses } = require('../utils/teacherPayroll')
 
 // Clases de esta semana que ya pasaron y todavia no fueron marcadas por el
 // profesor autenticado — es su "lista de pendientes" para confirmar
@@ -84,6 +85,11 @@ router.post('/attendance/mark', protect, async (req, res) => {
       },
       { upsert: true, new: true, runValidators: true }
     )
+
+    // Recalcula el gasto de nomina de inmediato — si no, el entry de
+    // Egresos queda desactualizado hasta el proximo tick del cron (cada
+    // 30 min, ver server.js).
+    await syncPayrollExpenses()
 
     res.json(record)
   } catch (error) {
