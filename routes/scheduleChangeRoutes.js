@@ -10,6 +10,7 @@ const { getNextMeetingDate } = require('../utils/scheduleTime')
 const { sendPushToUser } = require('../utils/pushService')
 const { findTeacherConflict } = require('../utils/teacherConflict')
 const { dayLabels } = require('../utils/dayLabels')
+const { getWeekStart } = require('../utils/weeklyOccurrences')
 
 const CANCELLATION_WINDOW_MS = 60 * 60 * 1000
 
@@ -25,6 +26,27 @@ router.get('/schedule-changes/my-upcoming', protect, async (req, res) => {
     res.json(changes)
   } catch (error) {
     res.status(500).json({ message: 'Error obteniendo cambios de horario' })
+  }
+})
+
+// Cuantas clases propias se cancelaron esta semana — a diferencia de
+// my-upcoming (que solo mira hacia adelante), esto cuenta lo que ya paso
+// en la semana tambien, para alimentar la tarjeta de "Clases canceladas"
+// del dashboard del estudiante.
+router.get('/schedule-changes/my-cancelled-week', protect, async (req, res) => {
+  try {
+    const weekStart = getWeekStart()
+    const weekEnd = new Date(weekStart.getTime() + 7 * 24 * 60 * 60 * 1000)
+
+    const cancelledCount = await ScheduleChange.countDocuments({
+      studentId: req.user._id,
+      action: 'cancelled',
+      originalDate: { $gte: weekStart, $lt: weekEnd },
+    })
+
+    res.json({ cancelledCount })
+  } catch (error) {
+    res.status(500).json({ message: 'Error obteniendo tus clases canceladas' })
   }
 })
 
