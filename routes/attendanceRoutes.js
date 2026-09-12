@@ -6,6 +6,7 @@ const { protect } = require('../middleware/usersMiddleware')
 const { adminOnly } = require('../middleware/roleMiddleware')
 const { computeWeeklyOccurrences } = require('../utils/weeklyOccurrences')
 const { syncPayrollExpenses } = require('../utils/teacherPayroll')
+const { isTeacherLike } = require('../utils/roles')
 
 // Clases de esta semana que ya pasaron y todavia no fueron marcadas por el
 // profesor autenticado — es su "lista de pendientes" para confirmar
@@ -13,7 +14,7 @@ const { syncPayrollExpenses } = require('../utils/teacherPayroll')
 // dia de semanas anteriores, habria que ampliar el rango).
 router.get('/attendance/pending', protect, async (req, res) => {
   try {
-    if (req.user.role !== 'teacher') {
+    if (!isTeacherLike(req.user)) {
       return res.status(403).json({ message: 'Solo un profesor tiene clases para marcar' })
     }
 
@@ -47,7 +48,7 @@ router.get('/attendance/pending', protect, async (req, res) => {
 // admin, y asistencia/progreso del estudiante.
 router.post('/attendance/mark', protect, async (req, res) => {
   try {
-    if (req.user.role !== 'teacher') {
+    if (!isTeacherLike(req.user)) {
       return res.status(403).json({ message: 'Solo un profesor puede marcar asistencia' })
     }
 

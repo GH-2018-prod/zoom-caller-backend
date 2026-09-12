@@ -8,6 +8,11 @@ const userSchema = new mongoose.Schema(
     password: { type: String, required: true },
     role: { type: String, enum: ['student', 'teacher', 'admin'], default: 'student' },
     active: {type: Boolean, default: true},
+    // Solo aplica a role:'admin' — un admin que ADEMAS da clases: puede
+    // ser elegido como profesor de un horario, marcar asistencia, y en el
+    // cliente puede alternar entre la vista de admin y la de profesor
+    // desde el menu hamburguesa (ver Profile.jsx#viewMode).
+    isTeacher: { type: Boolean, default: false },
     details: {type: Object},
     resetPasswordToken: { type: String },
     resetPasswordExpires: { type: Date },

@@ -8,6 +8,7 @@ const linkSchema = new mongoose.Schema(
       unique: true,
       uppercase: true,
       trim: true,
+      maxlength: [10, 'El nombre del link no puede tener mas de 10 caracteres'],
       index: true
     },
 

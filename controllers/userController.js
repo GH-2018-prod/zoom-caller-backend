@@ -80,7 +80,7 @@ if (!isMatch) return res.status(400).json({ msg: 'Credenciales inválidas (contr
     const payload = { user: { id: user.id, role: user.role,  } };
     const token = jwt.sign(payload, process.env.JWT_SECRET, { expiresIn: JWT_EXPIRES_IN });
 
-    res.json({ token, user: { id: user.id, name: user.name, email: user.email, role: user.role, active: user.active, details: user.details } });
+    res.json({ token, user: { id: user.id, name: user.name, email: user.email, role: user.role, active: user.active, isTeacher: user.isTeacher, details: user.details } });
   } catch (error) {
     console.error('Error en loginUser:', error);
     res.status(500).send('Error en el servidor');
@@ -204,7 +204,10 @@ const updateUser = async (req, res) => {
       }
     }
 
-    const updatedUser = await User.findByIdAndUpdate(id, updates, { new: true, runValidators: true });
+    const updatedUser = await User.findByIdAndUpdate(id, updates, {
+      new: true,
+      runValidators: true,
+    }).select('-password');
 
     if (!updatedUser) {
       return res.status(404).json({ message: 'Usuario no encontrado' });

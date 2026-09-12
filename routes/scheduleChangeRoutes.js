@@ -11,6 +11,7 @@ const { sendPushToUser } = require('../utils/pushService')
 const { findTeacherConflict } = require('../utils/teacherConflict')
 const { dayLabels } = require('../utils/dayLabels')
 const { getWeekStart } = require('../utils/weeklyOccurrences')
+const { isTeacherLike } = require('../utils/roles')
 
 const CANCELLATION_WINDOW_MS = 60 * 60 * 1000
 
@@ -120,8 +121,8 @@ router.post('/schedule-changes/reschedule', protect, async (req, res) => {
       return res.status(404).json({ message: 'Ese horario no es parte de tu clase' })
     }
 
-    const newTeacher = await User.findOne({ _id: newTeacherId, role: 'teacher' }).select('name')
-    if (!newTeacher) {
+    const newTeacher = await User.findOne({ _id: newTeacherId }).select('name role isTeacher')
+    if (!newTeacher || !isTeacherLike(newTeacher)) {
       return res.status(404).json({ message: 'Profesor no encontrado' })
     }
 
@@ -430,8 +431,8 @@ router.post('/schedule-changes/fixed-slots', protect, teacherOrAdminOnly, async 
       return res.status(400).json({ message: 'Selecciona un profesor' })
     }
     if (!teacherName) {
-      const teacherUser = await User.findOne({ _id: teacherId, role: 'teacher' }).select('name')
-      if (!teacherUser) {
+      const teacherUser = await User.findOne({ _id: teacherId }).select('name role isTeacher')
+      if (!teacherUser || !isTeacherLike(teacherUser)) {
         return res.status(404).json({ message: 'Profesor no encontrado' })
       }
       teacherName = teacherUser.name

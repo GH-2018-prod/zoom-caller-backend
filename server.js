@@ -65,6 +65,9 @@ app.use('/api', require('./routes/payrollRoutes'))
 //Attendance Route (el profesor marca clases dictadas/no dictadas)
 app.use('/api', require('./routes/attendanceRoutes'))
 
+//Lesson records Route (biblioteca: historial de lecciones por nivel)
+app.use('/api', require('./routes/lessonRecordRoutes'))
+
 startReminderJobs()
 
 // Sincroniza el gasto de nomina de cada profesor cada 30 min, y una vez al
