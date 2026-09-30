@@ -7,7 +7,7 @@ const jwt = require('jsonwebtoken')
 const cloudinary = require('cloudinary').v2
 const { validationResult } = require('express-validator')
 const { sendWelcomeEmail, sendPasswordResetEmail } = require('../utils/emailService')
-const { findTeacherConflict } = require('../utils/teacherConflict')
+const { hasCapacity } = require('../utils/slotCapacity')
 const { dayLabels } = require('../utils/dayLabels')
 
 // Tokens de larga duracion (antes 365d) sin refresh token detras.
@@ -23,14 +23,15 @@ const registerUser = async (req, res) => {
     let user = await User.findOne({ email });
     if (user) return res.status(400).json({ msg: 'El usuario ya existe' });
 
-    // Un profesor no puede quedar con dos clases distintas al mismo
-    // dia+hora — se valida ANTES de crear al estudiante.
+    // El horario de destino no puede estar ya lleno (privado = 1 cupo,
+    // grupal = su capacidad configurada) — se valida ANTES de crear al
+    // estudiante.
     for (const entry of details?.schedule || []) {
       if (!entry.day || !entry.time || !entry.teacherId) continue
-      const conflict = await findTeacherConflict(entry.teacherId, entry.day, entry.time)
-      if (conflict) {
+      const { hasRoom, occupancy, capacity } = await hasCapacity(entry.teacherId, entry.day, entry.time)
+      if (!hasRoom) {
         return res.status(400).json({
-          msg: `Ese profesor ya tiene clase el ${dayLabels[entry.day]} a las ${entry.time} (con ${conflict.name})`,
+          msg: `Ese profesor ya tiene el cupo lleno (${occupancy}/${capacity}) el ${dayLabels[entry.day]} a las ${entry.time}`,
         })
       }
     }
@@ -191,15 +192,14 @@ const updateUser = async (req, res) => {
       delete updates.password;
     }
 
-    // Un profesor no puede quedar con dos clases distintas al mismo
-    // dia+hora — se excluye al propio estudiante para no chocar contra sus
-    // propias entradas sin cambios.
+    // El horario de destino no puede estar ya lleno — se excluye al propio
+    // estudiante para no chocar contra sus propias entradas sin cambios.
     for (const entry of updates.details?.schedule || []) {
       if (!entry.day || !entry.time || !entry.teacherId) continue
-      const conflict = await findTeacherConflict(entry.teacherId, entry.day, entry.time, id)
-      if (conflict) {
+      const { hasRoom, occupancy, capacity } = await hasCapacity(entry.teacherId, entry.day, entry.time, id)
+      if (!hasRoom) {
         return res.status(400).json({
-          message: `Ese profesor ya tiene clase el ${dayLabels[entry.day]} a las ${entry.time} (con ${conflict.name})`,
+          message: `Ese profesor ya tiene el cupo lleno (${occupancy}/${capacity}) el ${dayLabels[entry.day]} a las ${entry.time}`,
         });
       }
     }

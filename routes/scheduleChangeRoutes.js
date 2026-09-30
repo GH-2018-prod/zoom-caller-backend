@@ -8,9 +8,9 @@ const { protect } = require('../middleware/usersMiddleware')
 const { teacherOrAdminOnly } = require('../middleware/roleMiddleware')
 const { getNextMeetingDate } = require('../utils/scheduleTime')
 const { sendPushToUser } = require('../utils/pushService')
-const { findTeacherConflict } = require('../utils/teacherConflict')
+const { getOccupancy, hasCapacity } = require('../utils/slotCapacity')
 const { dayLabels } = require('../utils/dayLabels')
-const { getWeekStart } = require('../utils/weeklyOccurrences')
+const { getWeekStart, computeWeeklyOccurrences } = require('../utils/weeklyOccurrences')
 const { isTeacherLike } = require('../utils/roles')
 
 const CANCELLATION_WINDOW_MS = 60 * 60 * 1000
@@ -93,6 +93,29 @@ router.post('/schedule-changes/cancel', protect, async (req, res) => {
       { new: true, upsert: true, runValidators: true }
     )
 
+    // Si esta clase se asigno a mano (admin/legacy) y nunca paso por el
+    // selector de "Disponibles", no existe un RescheduleSlot para este
+    // profesor+dia+hora — sin esto, el cupo que se libera al cancelar no
+    // aparece en ningun lado. Se crea con capacidad 1 (era de un solo
+    // estudiante) SOLO si todavia no existe uno — nunca pisa la capacidad
+    // de un horario grupal que ya estuviera formalizado.
+    if (scheduleEntry.teacherId && req.user.details?.level) {
+      await RescheduleSlot.findOneAndUpdate(
+        { teacherId: scheduleEntry.teacherId, day, time },
+        {
+          $setOnInsert: {
+            teacherId: scheduleEntry.teacherId,
+            teacherName: scheduleEntry.teacher || 'Profesor',
+            day,
+            time,
+            capacity: 1,
+            level: req.user.details.level,
+          },
+        },
+        { upsert: true }
+      )
+    }
+
     if (change.teacherId) {
       await sendPushToUser(change.teacherId, {
         title: 'Clase cancelada',
@@ -127,42 +150,34 @@ router.post('/schedule-changes/reschedule', protect, async (req, res) => {
     }
 
     // Un horario es valido para reprogramar si ESE profesor lo dejo en su
-    // lista fija, O si le quedo libre en su horario ORIGINAL porque un
-    // estudiante suyo (o el mismo) cancelo/reprogramo justo esa clase esta
-    // semana. La clase pasa a ser de ese profesor — no del original.
-    const isFixed = await RescheduleSlot.exists({
+    // lista fija (con cupo disponible) — la clase pasa a ser de ese
+    // profesor, no del original. El RescheduleSlot ya no se borra al
+    // ocuparse (ver choose-initial-slot), asi que la disponibilidad real
+    // se calcula en vivo contra su capacidad, no contra su existencia.
+    const targetSlot = await RescheduleSlot.findOne({
       teacherId: newTeacherId,
       day: newDay,
       time: newTime,
-    })
-    const isFreed = await ScheduleChange.exists({
-      action: { $in: ['cancelled', 'rescheduled'] },
-      originalDay: newDay,
-      originalTime: newTime,
-      originalDate: { $gte: new Date() },
-      teacherId: newTeacherId,
-    })
-    if (!isFixed && !isFreed) {
+    }).select('level')
+    if (!targetSlot) {
       return res.status(400).json({ message: 'Ese horario no esta disponible' })
     }
 
-    // El slot de ESE profesor puede estar ocupado por otra reprogramacion
-    // vigente — salvo que sea la propia (re-elegir el mismo horario para la
-    // misma clase no cuenta como "ocupado por otro").
-    const occupant = await ScheduleChange.findOne({
-      action: 'rescheduled',
-      newDay,
-      newTime,
-      newTeacherId,
-      originalDate: { $gte: new Date() },
-    })
-    const isOwnOccupant =
-      occupant &&
-      occupant.studentId.toString() === req.user._id.toString() &&
-      occupant.originalDay === day &&
-      occupant.originalTime === time
-    if (occupant && !isOwnOccupant) {
-      return res.status(400).json({ message: 'Ese horario ya esta ocupado por otro estudiante' })
+    // El link de Zoom es por nivel — un horario grupal solo puede tener
+    // estudiantes del mismo nivel que el horario, si no cada uno
+    // necesitaria un link distinto para la "misma" clase.
+    if (targetSlot.level !== req.user.details?.level) {
+      return res
+        .status(400)
+        .json({ message: `Ese horario es para nivel ${targetSlot.level}, tu nivel es ${req.user.details?.level || 'desconocido'}` })
+    }
+
+    // Se excluye al propio estudiante de la cuenta de ocupacion — si ya
+    // estaba anotado justo ahi, re-elegir el mismo horario no debe
+    // bloquearse a si mismo.
+    const { hasRoom } = await hasCapacity(newTeacherId, newDay, newTime, req.user._id)
+    if (!hasRoom) {
+      return res.status(400).json({ message: 'Ese horario ya esta lleno' })
     }
 
     const meetingDate = getNextMeetingDate(day, time)
@@ -195,6 +210,27 @@ router.post('/schedule-changes/reschedule', protect, async (req, res) => {
       { new: true, upsert: true, runValidators: true }
     )
 
+    // El horario ORIGINAL tambien queda con un cupo libre, no solo el
+    // nuevo — si nunca existio un RescheduleSlot para ese profesor+dia+hora
+    // (asignacion manual/legacy), se crea ahora con capacidad 1 para que
+    // el cupo liberado aparezca en "Disponibles".
+    if (originalTeacherId && req.user.details?.level) {
+      await RescheduleSlot.findOneAndUpdate(
+        { teacherId: originalTeacherId, day, time },
+        {
+          $setOnInsert: {
+            teacherId: originalTeacherId,
+            teacherName: scheduleEntry.teacher || 'Profesor',
+            day,
+            time,
+            capacity: 1,
+            level: req.user.details.level,
+          },
+        },
+        { upsert: true }
+      )
+    }
+
     // Al profesor original se le avisa que perdio esa sesion puntual (si es
     // otro distinto del nuevo dueno del horario).
     if (originalTeacherId && originalTeacherId.toString() !== newTeacherId.toString()) {
@@ -217,13 +253,12 @@ router.post('/schedule-changes/reschedule', protect, async (req, res) => {
 })
 
 // Un estudiante elige un horario permanente — SOLO de la lista fija de
-// disponibilidad de un profesor, nunca de "liberados", porque esos son
-// libres solo por esta semana y la que viene volverian a chocar con la
-// clase real de otro estudiante. Si tiene una entrada en blanco (el admin
-// lo creo sin asignarle dia/hora), la completa; si no tiene ninguna en
-// blanco, agrega una clase mas (para el que quiere sumar otro horario).
-// Al confirmarse, deja de ser "disponible" (se borra el RescheduleSlot)
-// porque ya es una clase real, no un cupo.
+// disponibilidad de un profesor, con cupo libre segun su capacidad. Si
+// tiene una entrada en blanco (el admin lo creo sin asignarle dia/hora),
+// la completa; si no tiene ninguna en blanco, agrega una clase mas (para
+// el que quiere sumar otro horario). El RescheduleSlot NO se borra al
+// ocuparse — sigue existiendo mientras tenga cupo (clases grupales
+// aceptan mas de un estudiante en el mismo horario).
 router.post('/schedule-changes/choose-initial-slot', protect, async (req, res) => {
   try {
     if (req.user.role !== 'student') {
@@ -243,12 +278,18 @@ router.post('/schedule-changes/choose-initial-slot', protect, async (req, res) =
       return res.status(400).json({ message: 'Ese horario ya no está disponible' })
     }
 
-    // Chequeo extra por si alguien mas tomo ese mismo horario justo antes.
-    const conflict = await findTeacherConflict(teacherId, day, time)
-    if (conflict) {
-      return res
-        .status(400)
-        .json({ message: `Ese horario ya no está disponible (ocupado por ${conflict.name})` })
+    // El link de Zoom es por nivel — un horario grupal solo puede tener
+    // estudiantes del mismo nivel que el horario.
+    if (slot.level !== req.user.details?.level) {
+      return res.status(400).json({
+        message: `Ese horario es para nivel ${slot.level}, tu nivel es ${req.user.details?.level || 'desconocido'}`,
+      })
+    }
+
+    // Chequeo extra por si alguien mas tomo el ultimo cupo justo antes.
+    const { hasRoom } = await hasCapacity(teacherId, day, time, req.user._id)
+    if (!hasRoom) {
+      return res.status(400).json({ message: 'Ese horario ya no tiene cupo disponible' })
     }
 
     const updatedSchedule = [...schedule]
@@ -264,9 +305,6 @@ router.post('/schedule-changes/choose-initial-slot', protect, async (req, res) =
       { 'details.schedule': updatedSchedule },
       { new: true, runValidators: true }
     ).select('-password')
-
-    // Ya no es disponibilidad libre — es una clase real ocupando ese lugar.
-    await RescheduleSlot.deleteOne({ _id: slot._id })
 
     res.json(updatedUser)
   } catch (error) {
@@ -348,80 +386,48 @@ router.put(
 // Un profesor solo ve los suyos (no puede ver los de otros profesores); el
 // admin y los estudiantes ven todos (el estudiante los necesita para el
 // selector de reprogramar, y tiene que poder elegir cualquier profesor).
+// Cada slot vuelve con "occupancy" (cuantos estudiantes tiene esta semana)
+// junto a su "capacity" — un cupo liberado por cancelacion reaparece solo
+// aca (baja la ocupacion), sin necesitar una lista aparte de "liberados".
 router.get('/schedule-changes/fixed-slots', protect, async (req, res) => {
   try {
-    const filter = req.user.role === 'teacher' ? { teacherId: req.user._id } : {}
+    const filter = {}
+    if (req.user.role === 'teacher') filter.teacherId = req.user._id
+    // Un estudiante solo puede ocupar horarios de su propio nivel (el link
+    // de Zoom es por nivel) — se filtra aca para que ni siquiera los vea
+    // en el selector, no solo para bloquearlo al elegir uno. Admin/profesor
+    // ven todos los niveles porque son quienes los administran.
+    if (req.user.role === 'student' && req.user.details?.level) {
+      filter.level = req.user.details.level
+    }
     const slots = await RescheduleSlot.find(filter).sort({ day: 1, time: 1 })
-    res.json(slots)
+    const { occurrences } = await computeWeeklyOccurrences()
+
+    const withOccupancy = slots.map((slot) => {
+      const teacherId = slot.teacherId.toString()
+      const occupancy = occurrences.filter(
+        (o) => o.teacherId === teacherId && o.day === slot.day && o.time === slot.time
+      ).length
+      return { ...slot.toObject(), occupancy }
+    })
+
+    res.json(withOccupancy)
   } catch (error) {
     res.status(500).json({ message: 'Error obteniendo horarios disponibles' })
   }
 })
 
-// Horarios que YA estan ocupados por una reprogramacion vigente de otro
-// estudiante — el frontend los saca del selector para no permitir un
-// choque. El profesor dueno del horario importa: dos profesores distintos
-// pueden compartir el mismo dia+hora sin chocar entre si.
-router.get('/schedule-changes/occupied-slots', protect, async (req, res) => {
-  try {
-    const changes = await ScheduleChange.find({
-      action: 'rescheduled',
-      originalDate: { $gte: new Date() },
-    }).select('newDay newTime newTeacherId')
-    res.json(
-      changes.map((c) => ({
-        day: c.newDay,
-        time: c.newTime,
-        teacherId: c.newTeacherId?.toString() || null,
-      }))
-    )
-  } catch (error) {
-    res.status(500).json({ message: 'Error obteniendo horarios ocupados' })
-  }
-})
-
-// Horarios que quedaron libres esta semana en su horario ORIGINAL — porque
-// alguien cancelo esa clase, o porque la reprogramo a otro horario (el
-// original tambien queda vacio, no solo el nuevo). Cada uno queda libre
-// para el profesor que la dictaba, no para cualquiera — se suman al pool
-// de ESE profesor (fixed-slots). Un profesor solo ve los suyos; admin y
-// estudiantes ven todos.
-router.get('/schedule-changes/freed-slots', protect, async (req, res) => {
-  try {
-    const filter = {
-      action: { $in: ['cancelled', 'rescheduled'] },
-      originalDate: { $gte: new Date() },
-    }
-    if (req.user.role === 'teacher') {
-      filter.teacherId = req.user._id
-    }
-    const changes = await ScheduleChange.find(filter)
-      .select('originalDay originalTime teacherId')
-      .populate('teacherId', 'name')
-    res.json(
-      changes
-        .filter((c) => c.teacherId)
-        .map((c) => ({
-          day: c.originalDay,
-          time: c.originalTime,
-          teacherId: c.teacherId._id.toString(),
-          teacherName: c.teacherId.name,
-        }))
-    )
-  } catch (error) {
-    res.status(500).json({ message: 'Error obteniendo horarios liberados' })
-  }
-})
-
 // Un profesor habilita sus propios horarios; el admin puede habilitar uno
-// a nombre de cualquier profesor. Ninguno de los dos puede dejar un
-// horario donde ese profesor ya tiene una clase (no puede estar "libre" y
-// "ocupado" al mismo tiempo).
+// a nombre de cualquier profesor, con la capacidad que quiera (1 =
+// privada, 2+ = grupal).
 router.post('/schedule-changes/fixed-slots', protect, teacherOrAdminOnly, async (req, res) => {
   try {
-    const { day, time } = req.body
-    if (!day || !time) {
-      return res.status(400).json({ message: 'Dia y hora son obligatorios' })
+    const { day, time, capacity, level } = req.body
+    if (!day || !time || !level) {
+      return res.status(400).json({ message: 'Dia, hora y nivel son obligatorios' })
+    }
+    if (capacity !== undefined && (!Number.isInteger(capacity) || capacity < 1)) {
+      return res.status(400).json({ message: 'La capacidad tiene que ser un numero entero de al menos 1' })
     }
 
     let teacherId = req.user.role === 'teacher' ? req.user._id.toString() : req.body.teacherId
@@ -438,15 +444,15 @@ router.post('/schedule-changes/fixed-slots', protect, teacherOrAdminOnly, async 
       teacherName = teacherUser.name
     }
 
-    const conflict = await findTeacherConflict(teacherId, day, time)
-    if (conflict) {
-      return res.status(400).json({
-        message: `${teacherName} ya tiene clase el ${dayLabels[day]} a las ${time} (con ${conflict.name})`,
-      })
-    }
-
-    const slot = await RescheduleSlot.create({ teacherId, teacherName, day, time })
-    res.status(201).json(slot)
+    const slot = await RescheduleSlot.create({
+      teacherId,
+      teacherName,
+      day,
+      time,
+      level,
+      ...(capacity !== undefined && { capacity }),
+    })
+    res.status(201).json({ ...slot.toObject(), occupancy: 0 })
   } catch (error) {
     if (error.code === 11000) {
       return res.status(400).json({ message: 'Ese horario ya esta disponible' })
@@ -454,6 +460,43 @@ router.post('/schedule-changes/fixed-slots', protect, teacherOrAdminOnly, async 
     res.status(500).json({ message: 'Error agregando el horario' })
   }
 })
+
+// Sube o baja la capacidad de un horario ya existente — no se puede bajar
+// por debajo de cuantos estudiantes ya estan anotados ahi esta semana.
+router.put(
+  '/schedule-changes/fixed-slots/:id/capacity',
+  protect,
+  teacherOrAdminOnly,
+  async (req, res) => {
+    try {
+      const { capacity } = req.body
+      if (!Number.isInteger(capacity) || capacity < 1) {
+        return res.status(400).json({ message: 'La capacidad tiene que ser un numero entero de al menos 1' })
+      }
+
+      const slot = await RescheduleSlot.findById(req.params.id)
+      if (!slot) {
+        return res.status(404).json({ message: 'Horario no encontrado' })
+      }
+      if (req.user.role === 'teacher' && slot.teacherId.toString() !== req.user._id.toString()) {
+        return res.status(403).json({ message: 'No podes editar el horario de otro profesor' })
+      }
+
+      const occupancy = await getOccupancy(slot.teacherId, slot.day, slot.time)
+      if (capacity < occupancy) {
+        return res.status(400).json({
+          message: `No podes bajar la capacidad por debajo de los ${occupancy} estudiantes que ya estan anotados ahi`,
+        })
+      }
+
+      slot.capacity = capacity
+      await slot.save()
+      res.json({ ...slot.toObject(), occupancy })
+    } catch (error) {
+      res.status(500).json({ message: 'Error actualizando la capacidad' })
+    }
+  }
+)
 
 router.delete(
   '/schedule-changes/fixed-slots/:id',
